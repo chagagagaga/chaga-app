@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Chaga cartoons</title>
+<meta name="robots" content="noindex">
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root { --bg:#f6f1e7; --card:#fffaf0; --ink:#2a1c14; --mute:#8a7a6a; --line:#e6dccb; --acc:#b8862b; --ok:#3f7a4f; --bad:#a3342f; --chip:#efe5d2; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#16131a; --card:#221d26; --ink:#f3ead9; --mute:#a397a8; --line:#352d3b; --acc:#ffc857; --ok:#7ccf8f; --bad:#ff8a7a; --chip:#2e2733; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.45 -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { position:sticky; top:0; z-index:5; background:var(--bg); padding:14px 16px 8px; border-bottom:1px solid var(--line); }
+  h1 { margin:0 0 8px; font:600 20px/1.2 Georgia, serif; letter-spacing:.06em; }
+  h1 small { font:400 12px sans-serif; color:var(--mute); letter-spacing:0; margin-left:8px; }
+  nav { display:flex; gap:6px; overflow-x:auto; padding-bottom:4px; scrollbar-width:none; }
+  nav button { flex:none; border:1px solid var(--line); background:var(--card); color:var(--ink); border-radius:18px; padding:6px 12px; font-size:14px; }
+  nav button.on { background:var(--ink); color:var(--bg); border-color:var(--ink); }
+  main { padding:12px 16px 80px; max-width:760px; margin:0 auto; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; margin-bottom:12px; }
+  .top { display:flex; justify-content:space-between; gap:8px; font-size:13px; color:var(--mute); }
+  .title { font:600 18px/1.3 Georgia, serif; margin:6px 0; }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; margin:6px 0; }
+  .chip { background:var(--chip); border-radius:10px; padding:2px 8px; font-size:13px; }
+  .chip.hi { color:var(--ok); } .chip.lo { color:var(--bad); }
+  details { margin-top:8px; } summary { cursor:pointer; color:var(--acc); font-size:14px; }
+  .text { white-space:pre-wrap; margin-top:8px; }
+  video { width:100%; border-radius:10px; margin-top:8px; background:#000; }
+  .btns { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:12px; }
+  .btns a { text-align:center; text-decoration:none; padding:10px; border-radius:10px; border:1px solid var(--line); color:var(--ink); font-size:15px; }
+  .btns a.ok { background:var(--ok); color:#fff; border-color:var(--ok); }
+  .hist { font-size:13px; color:var(--mute); margin-top:6px; white-space:pre-wrap; }
+  .empty, #msg { color:var(--mute); text-align:center; padding:40px 0; }
+</style>
+</head>
+<body>
+<header><h1>CHAGA CARTOONS<small id="upd"></small></h1><nav id="tabs"></nav></header>
+<main id="list"><div id="msg">Загружаю…</div></main>
+<script>
+const TG = window.Telegram && Telegram.WebApp; if (TG) { TG.ready(); TG.expand(); }
+const K = new URLSearchParams(location.hash.slice(1)).get("k") || localStorage.getItem("chaga_k");
+const b64 = (s) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((s.length + 3) % 4)), (c) => c.charCodeAt(0));
+let D = null, TAB = localStorage.getItem("chaga_tab") || "you";
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+async function open(buf) {
+  const ck = await crypto.subtle.importKey("raw", b64(K), "AES-GCM", false, ["decrypt"]);
+  const u = new Uint8Array(buf);
+  return crypto.subtle.decrypt({ name: "AES-GCM", iv: u.slice(0, 12) }, ck, u.slice(12));
+}
+async function load() {
+  if (!K) { document.getElementById("msg").textContent = "Нет ключа: открой ссылку из бота (/app)."; return; }
+  try { localStorage.setItem("chaga_k", K); } catch (e) {}
+  const r = await fetch("data.bin?" + Date.now(), { cache: "no-store" });
+  const plain = await open(await r.arrayBuffer());
+  const txt = await new Response(new Blob([plain]).stream().pipeThrough(new DecompressionStream("gzip"))).text();
+  D = JSON.parse(txt); render();
+}
+function act(a, id) {
+  if (TG && TG.initData && TG.sendData) { try { TG.sendData(JSON.stringify({ a, id })); return; } catch (e) {} }
+  location.href = `https://t.me/${D.bot}?start=${a}_${id}`;
+}
+async function video(el, path) {
+  if (el.dataset.done) return; el.dataset.done = 1;
+  const r = await fetch(path); const plain = await open(await r.arrayBuffer());
+  el.querySelector("video").src = URL.createObjectURL(new Blob([plain], { type: "video/mp4" }));
+}
+function render() {
+  const items = D.items, tabs = document.getElementById("tabs");
+  tabs.innerHTML = Object.entries(D.status).map(([k, v]) => {
+    const n = items.filter((i) => i.status === k).length;
+    return `<button class="${k === TAB ? "on" : ""}" data-t="${k}">${v}${n ? " " + n : ""}</button>`;
+  }).join("");
+  tabs.querySelectorAll("button").forEach((b) => b.onclick = () => { TAB = b.dataset.t; try { localStorage.setItem("chaga_tab", TAB); } catch (e) {} render(); });
+  const list = items.filter((i) => i.status === TAB);
+  document.getElementById("list").innerHTML = list.length ? list.map(card).join("") : `<div class="empty">Пусто</div>`;
+  document.querySelectorAll("[data-a]").forEach((b) => b.onclick = (e) => { e.preventDefault(); act(b.dataset.a, b.dataset.id); });
+  document.querySelectorAll("details[data-v]").forEach((d) => d.addEventListener("toggle", () => d.open && video(d, d.dataset.v)));
+  const last = items.map((i) => i.updated).filter(Boolean)[0]; document.getElementById("upd").textContent = last ? "обновлено " + last : "";
+}
+function card(i) {
+  const flag = i.lang === "en" ? "🇺🇸" : "🇷🇺", kind = i.kind === "reel" ? "🎬 Ролик" : "📝 Сценарий";
+  const sc = Object.entries(i.scores || {}).map(([k, v]) => `<span class="chip ${v >= 8 ? "hi" : v < 7 ? "lo" : ""}">${esc(k)} ${v}</span>`).join("");
+  const meta = [i.rubric, i.style, i.seconds ? `~${i.seconds} с` : "", i.stage].filter(Boolean).map((x) => `<span class="chip">${esc(x)}</span>`).join("");
+  const vid = i.video ? `<details data-v="${i.video}" open><summary>Видео</summary><video controls playsinline preload="none"></video></details>` : "";
+  const btns = i.status === "you" ? `<div class="btns"><a class="ok" data-a="ap" data-id="${i.id}" href="#">✅ Беру</a><a data-a="ed" data-id="${i.id}" href="#">✏️ Правки</a><a data-a="rw" data-id="${i.id}" href="#">❌ Переделать</a><a data-a="tr" data-id="${i.id}" href="#">🗑 Мусор</a></div>` : "";
+  return `<div class="card"><div class="top"><span>${kind} ${flag} ${esc(i.id)}</span><span>${esc(i.updated || "")}</span></div>
+    <div class="title">${esc(i.title)}</div><div class="chips">${meta}</div><div class="chips">${sc}</div>${vid}
+    ${i.text ? `<details${i.kind === "script" && i.status === "you" ? " open" : ""}><summary>Текст</summary><div class="text">${esc(i.text)}</div></details>` : ""}
+    ${i.review ? `<details><summary>Что исправили ревьюеры</summary><div class="text">${esc(i.review)}</div></details>` : ""}
+    ${i.notes ? `<details open><summary>Твои правки</summary><div class="text">${esc(i.notes)}</div></details>` : ""}
+    ${btns}
+    ${(i.history || []).length ? `<details><summary>История</summary><div class="hist">${esc(i.history.slice(-8).join("\n"))}</div></details>` : ""}</div>`;
+}
+load().catch((e) => document.getElementById("msg").textContent = "Не открылось: " + e.message);
+setInterval(() => load().catch(() => {}), 60000);
+</script>
+</body>
+</html>
