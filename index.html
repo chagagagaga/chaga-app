@@ -46,7 +46,8 @@ const TG = window.Telegram && Telegram.WebApp; if (TG) { TG.ready(); TG.expand()
 const K = new URLSearchParams(location.hash.slice(1)).get("k") || localStorage.getItem("chaga_k");
 const b64 = (s) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((s.length + 3) % 4)), (c) => c.charCodeAt(0));
 let D = null, TAB = localStorage.getItem("chaga_tab") || "you";
-const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const safeUrl = (u) => /^https:\/\//i.test(String(u || "")) ? esc(u) : "";   // только https: никаких javascript:
 
 async function open(buf) {
   const ck = await crypto.subtle.importKey("raw", b64(K), "AES-GCM", false, ["decrypt"]);
@@ -67,7 +68,10 @@ async function topic() { const h = new Uint8Array(await crypto.subtle.digest("SH
 async function seal(obj) {
   const ck = await crypto.subtle.importKey("raw", b64(K), "AES-GCM", false, ["encrypt"]);
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, ck, new TextEncoder().encode(JSON.stringify(obj))));
+  let raw = new TextEncoder().encode(JSON.stringify(obj));
+  if (window.CompressionStream)                    // gzip: длинные правки влезают в лимит ntfy (4 КБ), бот распакует
+    raw = new Uint8Array(await new Response(new Blob([raw]).stream().pipeThrough(new CompressionStream("gzip"))).arrayBuffer());
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, ck, raw));
   const all = new Uint8Array(12 + ct.length); all.set(iv); all.set(ct, 12);
   return btoa(String.fromCharCode(...all));
 }
@@ -76,9 +80,11 @@ const LABEL = { ap: "✅ Беру", ed: "✏️ Правки", rw: "❌ Пере
 async function act(a, id) {
   let text = "";
   if (a === "ed" || a === "rw") { text = prompt(a === "ed" ? "Правки к карточке (одним сообщением):" : "Что не так? (можно пусто)") ?? null; if (text === null) return; if (a === "ed" && !text.trim()) return;
-    if (new TextEncoder().encode(text).length > 2400) { toast("Слишком длинно для одной правки (~1200 знаков). Раздели на две и отправь по очереди."); return; } }
+  }
   try {
     const body = await seal({ a, id, text: text.trim(), ts: Date.now(), n: crypto.getRandomValues(new Uint32Array(2)).join("") });
+    // ntfy превращает сообщения > 4096 байт во вложение, и бот их не прочтёт: не отправляем, просим разделить
+    if (body.length > 3800) { toast("Слишком длинная правка для одной отправки. Раздели на части и отправь по очереди."); return; }
     const r = await fetch("https://ntfy.sh/" + await topic(), { method: "POST", body });
     if (!r.ok) throw new Error("ntfy " + r.status);
     const it = D.items.find((x) => x.id === id); if (it) { it.status = NEXT[a]; if (text) it.notes = ((it.notes || "") + "\n" + text).trim(); }
@@ -95,7 +101,7 @@ function render() {
   const up = (D.posts || []).filter((p) => p.status === "scheduled").length;
   tabs.innerHTML = Object.entries(D.status).map(([k, v]) => {
     const n = items.filter((i) => i.status === k).length;
-    return `<button class="${k === TAB ? "on" : ""}" data-t="${k}">${v}${n ? " " + n : ""}</button>`;
+    return `<button class="${k === TAB ? "on" : ""}" data-t="${esc(k)}">${esc(v)}${n ? " " + n : ""}</button>`;
   }).join("") + `<button class="${TAB === "cal" ? "on" : ""}" data-t="cal">📅 Выкладка${up ? " " + up : ""}</button>`;
   tabs.querySelectorAll("button").forEach((b) => b.onclick = () => { TAB = b.dataset.t; try { localStorage.setItem("chaga_tab", TAB); } catch (e) {} render(); });
   const list = items.filter((i) => i.status === TAB);
@@ -105,7 +111,7 @@ function render() {
   const last = items.map((i) => i.updated).filter(Boolean)[0]; document.getElementById("upd").textContent = last ? "обновлено " + last : "";
 }
 // календарь выкладки: по дням (Алматы), что и куда выходит, что уже вышло
-const PL = { instagram: "📸 Instagram", tiktok: "🎵 TikTok", youtube: "▶️ YouTube" }, ST = { scheduled: "⏳ запланирован", processing: "⏳ публикуется", published: "✅ вышел", failed: "⚠️ ошибка", deleted: "🗑 снят" };
+const PL = { instagram: "📸 Instagram", tiktok: "🎵 TikTok", youtube: "▶️ YouTube" }, ST = { scheduled: "⏳ запланирован", processing: "⏳ публикуется", published: "✅ вышел", failed: "⚠️ ошибка", deleted: "🗑 снят", unknown: "❔ проверяю", skipped: "⏭ пропущен" };
 function calendar() {
   const ps = D.posts || [];
   if (!ps.length) return `<div class="empty">Пока ничего не запланировано. Ролик встаёт в расписание после твоего ✅.</div>`;
@@ -113,19 +119,19 @@ function calendar() {
   const days = [...new Set(ps.map((p) => p.day))].sort();
   return days.map((d) => {
     const label = new Date(d + "T12:00:00").toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" });
-    const rows = ps.filter((p) => p.day === d).map((p) => `<div class="post ${p.status}"><span class="tm">${p.time}</span>
-      <span>${p.lang === "en" ? "🇺🇸" : "🇷🇺"} ${PL[p.platform] || p.platform}${p.role === "trial" ? " · Trial reels" : ""}</span>
-      <span class="ttl">${esc(p.title)}</span><span class="chip">${ST[p.status] || p.status}</span>
-      ${p.url ? `<a href="${esc(p.url)}" target="_blank" rel="noopener">открыть</a>` : ""}${p.error ? `<div class="err">${esc(p.error)}</div>` : ""}</div>`).join("");
+    const rows = ps.filter((p) => p.day === d).map((p) => `<div class="post ${esc(p.status)}"><span class="tm">${esc(p.time)}</span>
+      <span>${p.lang === "en" ? "🇺🇸" : "🇷🇺"} ${PL[p.platform] || esc(p.platform)}${p.role === "trial" ? " · Trial reels" : ""}</span>
+      <span class="ttl">${esc(p.title)}</span><span class="chip">${ST[p.status] || esc(p.status)}</span>
+      ${safeUrl(p.url) ? `<a href="${safeUrl(p.url)}" target="_blank" rel="noopener">открыть</a>` : ""}${p.error ? `<div class="err">${esc(p.error)}</div>` : ""}</div>`).join("");
     return `<div class="card"><div class="title">${d === today ? "Сегодня · " : ""}${label}</div>${rows}</div>`;
   }).join("");
 }
 function card(i) {
   const flag = i.lang === "en" ? "🇺🇸" : "🇷🇺", kind = i.kind === "reel" ? "🎬 Ролик" : "📝 Сценарий";
-  const sc = Object.entries(i.scores || {}).map(([k, v]) => `<span class="chip ${v >= 8 ? "hi" : v < 7 ? "lo" : ""}">${esc(k)} ${v}</span>`).join("");
+  const sc = Object.entries(i.scores || {}).map(([k, v]) => `<span class="chip ${v >= 8 ? "hi" : v < 7 ? "lo" : ""}">${esc(k)} ${esc(v)}</span>`).join("");
   const meta = [i.rubric, i.style, i.seconds ? `~${i.seconds} с` : "", i.stage].filter(Boolean).map((x) => `<span class="chip">${esc(x)}</span>`).join("");
-  const vid = i.video ? `<details data-v="${i.video}" open><summary>Видео</summary><video controls playsinline preload="none"></video></details>` : "";
-  const btns = i.status === "you" ? `<div class="btns"><a class="ok" data-a="ap" data-id="${i.id}" href="#">✅ Беру</a><a data-a="ed" data-id="${i.id}" href="#">✏️ Правки</a><a data-a="rw" data-id="${i.id}" href="#">❌ Переделать</a><a data-a="tr" data-id="${i.id}" href="#">🗑 Мусор</a></div>` : "";
+  const vid = i.video ? `<details data-v="${esc(i.video)}" open><summary>Видео</summary><video controls playsinline preload="none"></video></details>` : "";
+  const btns = i.status === "you" ? `<div class="btns"><a class="ok" data-a="ap" data-id="${esc(i.id)}" href="#">✅ Беру</a><a data-a="ed" data-id="${esc(i.id)}" href="#">✏️ Правки</a><a data-a="rw" data-id="${esc(i.id)}" href="#">❌ Переделать</a><a data-a="tr" data-id="${esc(i.id)}" href="#">🗑 Мусор</a></div>` : "";
   return `<div class="card"><div class="top"><span>${kind} ${flag} ${esc(i.id)}</span><span>${esc(i.updated || "")}</span></div>
     <div class="title">${esc(i.title)}</div><div class="chips">${meta}</div><div class="chips">${sc}</div>${vid}
     ${i.text ? `<details${i.kind === "script" && i.status === "you" ? " open" : ""}><summary>Текст</summary><div class="text">${esc(i.text)}</div></details>` : ""}
