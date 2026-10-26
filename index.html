@@ -45,7 +45,11 @@
 const TG = window.Telegram && Telegram.WebApp; if (TG) { TG.ready(); TG.expand(); }
 const K = new URLSearchParams(location.hash.slice(1)).get("k") || localStorage.getItem("chaga_k");
 const b64 = (s) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((s.length + 3) % 4)), (c) => c.charCodeAt(0));
-let D = null, TAB = localStorage.getItem("chaga_tab") || "you";
+let D = null, TAB = localStorage.getItem("chaga_tab") || "you-s";
+if (TAB === "you") TAB = "you-s";
+// «Ждут тебя» делится на две папки и стоит первой: сценарии и готовые ролики
+const YOU = { "you-s": ["📝 Сценарии ждут тебя", "script"], "you-r": ["🎬 Ролики ждут тебя", "reel"] };
+const inTab = (i, t) => YOU[t] ? i.status === "you" && i.kind === YOU[t][1] : i.status === t;
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const safeUrl = (u) => /^https:\/\//i.test(String(u || "")) ? esc(u) : "";   // только https: никаких javascript:
 
@@ -99,12 +103,13 @@ async function video(el, path) {
 function render() {
   const items = D.items, tabs = document.getElementById("tabs");
   const up = (D.posts || []).filter((p) => p.status === "scheduled").length;
-  tabs.innerHTML = Object.entries(D.status).map(([k, v]) => {
-    const n = items.filter((i) => i.status === k).length;
+  const tabList = [...Object.entries(YOU).map(([k, v]) => [k, v[0]]), ...Object.entries(D.status).filter(([k]) => k !== "you")];
+  tabs.innerHTML = tabList.map(([k, v]) => {
+    const n = items.filter((i) => inTab(i, k)).length;
     return `<button class="${k === TAB ? "on" : ""}" data-t="${esc(k)}">${esc(v)}${n ? " " + n : ""}</button>`;
   }).join("") + `<button class="${TAB === "cal" ? "on" : ""}" data-t="cal">📅 Выкладка${up ? " " + up : ""}</button>`;
   tabs.querySelectorAll("button").forEach((b) => b.onclick = () => { TAB = b.dataset.t; try { localStorage.setItem("chaga_tab", TAB); } catch (e) {} render(); });
-  const list = items.filter((i) => i.status === TAB);
+  const list = items.filter((i) => inTab(i, TAB));
   document.getElementById("list").innerHTML = TAB === "cal" ? calendar() : list.length ? list.map(card).join("") : `<div class="empty">Пусто</div>`;
   document.querySelectorAll("[data-a]").forEach((b) => b.onclick = (e) => { e.preventDefault(); act(b.dataset.a, b.dataset.id); });
   document.querySelectorAll("details[data-v]").forEach((d) => d.addEventListener("toggle", () => d.open && video(d, d.dataset.v)));
