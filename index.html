@@ -75,7 +75,8 @@ function toast(t) { let el = document.getElementById("toast"); if (!el) { el = d
 const LABEL = { ap: "✅ Беру", ed: "✏️ Правки", rw: "❌ Переделать", tr: "🗑 В мусор" }, NEXT = { ap: "approved", ed: "edits", rw: "edits", tr: "rejected" };
 async function act(a, id) {
   let text = "";
-  if (a === "ed" || a === "rw") { text = prompt(a === "ed" ? "Правки к карточке (одним сообщением):" : "Что не так? (можно пусто)") ?? null; if (text === null) return; if (a === "ed" && !text.trim()) return; }
+  if (a === "ed" || a === "rw") { text = prompt(a === "ed" ? "Правки к карточке (одним сообщением):" : "Что не так? (можно пусто)") ?? null; if (text === null) return; if (a === "ed" && !text.trim()) return;
+    if (new TextEncoder().encode(text).length > 2400) { toast("Слишком длинно для одной правки (~1200 знаков). Раздели на две и отправь по очереди."); return; } }
   try {
     const body = await seal({ a, id, text: text.trim(), ts: Date.now(), n: crypto.getRandomValues(new Uint32Array(2)).join("") });
     const r = await fetch("https://ntfy.sh/" + await topic(), { method: "POST", body });
