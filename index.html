@@ -32,6 +32,8 @@
   .btns a.ok { background:var(--ok); color:#fff; border-color:var(--ok); }
   .hist { font-size:13px; color:var(--mute); margin-top:6px; white-space:pre-wrap; }
   .empty, #msg { color:var(--mute); text-align:center; padding:40px 0; }
+  #toast { position:fixed; left:50%; bottom:24px; transform:translateX(-50%) translateY(120px); background:var(--ink); color:var(--bg); padding:10px 16px; border-radius:12px; font-size:14px; transition:transform .25s; max-width:calc(100% - 32px); z-index:9; }
+  #toast.show { transform:translateX(-50%) translateY(0); }
 </style>
 </head>
 <body>
@@ -57,9 +59,28 @@ async function load() {
   const txt = await new Response(new Blob([plain]).stream().pipeThrough(new DecompressionStream("gzip"))).text();
   D = JSON.parse(txt); render();
 }
-function act(a, id) {
-  if (TG && TG.initData && TG.sendData) { try { TG.sendData(JSON.stringify({ a, id })); return; } catch (e) {} }
-  location.href = `https://t.me/${D.bot}?start=${a}_${id}`;
+// кнопки работают в самом приложении: команда шифруется ключом приложения и уходит в закрытый ящик ntfy.sh
+// (адрес ящика выводится из ключа), бот забирает её каждые 30 с. Без ключа команду не подделать.
+async function topic() { const h = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode("chaga-cmd:" + K))); return "chaga-" + Array.from(h.slice(0, 16), (x) => x.toString(16).padStart(2, "0")).join(""); }
+async function seal(obj) {
+  const ck = await crypto.subtle.importKey("raw", b64(K), "AES-GCM", false, ["encrypt"]);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, ck, new TextEncoder().encode(JSON.stringify(obj))));
+  const all = new Uint8Array(12 + ct.length); all.set(iv); all.set(ct, 12);
+  return btoa(String.fromCharCode(...all));
+}
+function toast(t) { let el = document.getElementById("toast"); if (!el) { el = document.createElement("div"); el.id = "toast"; document.body.appendChild(el); } el.textContent = t; el.className = "show"; clearTimeout(el._t); el._t = setTimeout(() => el.className = "", 2600); }
+const LABEL = { ap: "✅ Беру", ed: "✏️ Правки", rw: "❌ Переделать", tr: "🗑 В мусор" }, NEXT = { ap: "approved", ed: "edits", rw: "edits", tr: "rejected" };
+async function act(a, id) {
+  let text = "";
+  if (a === "ed" || a === "rw") { text = prompt(a === "ed" ? "Правки к карточке (одним сообщением):" : "Что не так? (можно пусто)") ?? null; if (text === null) return; if (a === "ed" && !text.trim()) return; }
+  try {
+    const body = await seal({ a, id, text: text.trim(), ts: Date.now(), n: crypto.getRandomValues(new Uint32Array(2)).join("") });
+    const r = await fetch("https://ntfy.sh/" + await topic(), { method: "POST", body });
+    if (!r.ok) throw new Error("ntfy " + r.status);
+    const it = D.items.find((x) => x.id === id); if (it) { it.status = NEXT[a]; if (text) it.notes = ((it.notes || "") + "\n" + text).trim(); }
+    toast(`${LABEL[a]}: ${id}. Бот запишет за полминуты.`); render();
+  } catch (e) { toast("Не отправилось: " + e.message + ". Попробуй ещё раз."); }
 }
 async function video(el, path) {
   if (el.dataset.done) return; el.dataset.done = 1;
@@ -88,6 +109,7 @@ function card(i) {
   return `<div class="card"><div class="top"><span>${kind} ${flag} ${esc(i.id)}</span><span>${esc(i.updated || "")}</span></div>
     <div class="title">${esc(i.title)}</div><div class="chips">${meta}</div><div class="chips">${sc}</div>${vid}
     ${i.text ? `<details${i.kind === "script" && i.status === "you" ? " open" : ""}><summary>Текст</summary><div class="text">${esc(i.text)}</div></details>` : ""}
+    ${i.caption ? `<details${i.kind === "reel" ? " open" : ""}><summary>Подпись к ролику</summary><div class="text">${esc(i.caption)}</div></details>` : ""}
     ${i.review ? `<details><summary>Что исправили ревьюеры</summary><div class="text">${esc(i.review)}</div></details>` : ""}
     ${i.notes ? `<details open><summary>Твои правки</summary><div class="text">${esc(i.notes)}</div></details>` : ""}
     ${btns}
