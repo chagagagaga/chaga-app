@@ -64,8 +64,11 @@ async function load() {
   const r = await fetch("data.bin?" + Date.now(), { cache: "no-store" });
   const plain = await open(await r.arrayBuffer());
   const txt = await new Response(new Blob([plain]).stream().pipeThrough(new DecompressionStream("gzip"))).text();
-  D = JSON.parse(txt); render();
+  if (txt === LAST) return;                        // 30.10: данные не менялись: не перерисовываем (раньше раз в минуту обнулялся ролик)
+  LAST = txt; D = JSON.parse(txt); render();
 }
+let LAST = "";
+const VID = {};                                     // плееры по пути ролика: переживают перерисовку, позиция и воспроизведение сохраняются
 // кнопки работают в самом приложении: команда шифруется ключом приложения и уходит в закрытый ящик ntfy.sh
 // (адрес ящика выводится из ключа), бот забирает её каждые 30 с. Без ключа команду не подделать.
 async function topic() { const h = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode("chaga-cmd:" + K))); return "chaga-" + Array.from(h.slice(0, 16), (x) => x.toString(16).padStart(2, "0")).join(""); }
@@ -121,8 +124,10 @@ async function act(a, id) {
 }
 async function video(el, path) {
   if (el.dataset.done) return; el.dataset.done = 1;
+  if (VID[path]) return;
+  const v = el.querySelector("video"); VID[path] = v;
   const r = await fetch(path); const plain = await open(await r.arrayBuffer());
-  el.querySelector("video").src = URL.createObjectURL(new Blob([plain], { type: "video/mp4" }));
+  v.src = URL.createObjectURL(new Blob([plain], { type: "video/mp4" }));
 }
 function render() {
   const items = D.items, tabs = document.getElementById("tabs");
@@ -134,9 +139,13 @@ function render() {
   }).join("") + `<button class="${TAB === "cal" ? "on" : ""}" data-t="cal">📅 Выкладка${up ? " " + up : ""}</button>`;
   tabs.querySelectorAll("button").forEach((b) => b.onclick = () => { TAB = b.dataset.t; try { localStorage.setItem("chaga_tab", TAB); } catch (e) {} render(); });
   const list = items.filter((i) => inTab(i, TAB));
+  const playing = Object.values(VID).filter((v) => !v.paused && !v.ended);
   document.getElementById("list").innerHTML = TAB === "cal" ? calendar() : list.length ? list.map(card).join("") : `<div class="empty">Пусто</div>`;
   document.querySelectorAll("[data-a]").forEach((b) => b.onclick = (e) => { e.preventDefault(); act(b.dataset.a, b.dataset.id); });
-  document.querySelectorAll("details[data-v]").forEach((d) => d.addEventListener("toggle", () => d.open && video(d, d.dataset.v)));
+  document.querySelectorAll("details[data-v]").forEach((d) => {
+    const v = VID[d.dataset.v]; if (v) { d.querySelector("video").replaceWith(v); d.dataset.done = 1; if (playing.includes(v)) v.play().catch(() => {}); }
+    d.addEventListener("toggle", () => d.open && video(d, d.dataset.v));
+  });
   const last = items.map((i) => i.updated).filter(Boolean)[0]; document.getElementById("upd").textContent = last ? "обновлено " + last : "";
 }
 // календарь выкладки: по дням (Алматы), что и куда выходит, что уже вышло
