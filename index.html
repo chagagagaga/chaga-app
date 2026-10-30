@@ -81,6 +81,19 @@ async function seal(obj) {
 }
 function toast(t) { let el = document.getElementById("toast"); if (!el) { el = document.createElement("div"); el.id = "toast"; document.body.appendChild(el); } el.textContent = t; el.className = "show"; clearTimeout(el._t); el._t = setTimeout(() => el.className = "", 2600); }
 const LABEL = { ap: "✅ Беру", ed: "✏️ Правки", rw: "❌ Переделать", tr: "🗑 В мусор", vo: "🎙 Голосом" }, NEXT = { ap: "approved", ed: "edits", rw: "edits", tr: "rejected" };
+// очередь неотправленных команд (лимит ntfy / нет сети): повтор раз в 2 минуты и при каждом открытии, команды уже зашифрованы
+function pend() { try { return JSON.parse(localStorage.getItem("chaga_pending") || "[]"); } catch (e) { return []; } }
+function queue(body) { const q = pend(); q.push(body); try { localStorage.setItem("chaga_pending", JSON.stringify(q)); } catch (e) {} }
+async function flush() {
+  let q = pend(); if (!q.length || !K) return; const sent = q.length;
+  while (q.length) {
+    let r = null; try { r = await fetch("https://ntfy.sh/" + await topic(), { method: "POST", body: q[0] }); } catch (x) {}
+    if (!r || !r.ok) break;
+    q.shift(); try { localStorage.setItem("chaga_pending", JSON.stringify(q)); } catch (e) {}
+  }
+  if (q.length < sent) toast(`Дослал из очереди: ${sent - q.length}${q.length ? ", ждут ещё " + q.length : ""}.`);
+}
+setInterval(flush, 120e3); setTimeout(flush, 3e3);
 async function act(a, id) {
   let text = "";
   if (a === "ed" || a === "rw") { text = prompt(a === "ed" ? "Правки к карточке (одним сообщением):" : "Что не так? (можно пусто)") ?? null; if (text === null) return; if (a === "ed" && !text.trim()) return;
@@ -89,7 +102,13 @@ async function act(a, id) {
     const body = await seal({ a, id, text: text.trim(), ts: Date.now(), n: crypto.getRandomValues(new Uint32Array(2)).join("") });
     // ntfy превращает сообщения > 4096 байт во вложение, и бот их не прочтёт: не отправляем, просим разделить
     if (body.length > 3800) { toast("Слишком длинная правка для одной отправки. Раздели на части и отправь по очереди."); return; }
-    const r = await fetch("https://ntfy.sh/" + await topic(), { method: "POST", body });
+    let r = null; try { r = await fetch("https://ntfy.sh/" + await topic(), { method: "POST", body }); } catch (x) {}
+    // 30.10: лимит ntfy (429, ~250 сообщений в сутки на IP, сброс 00:00 UTC) или нет сети: команда в очередь, приложение дошлёт само
+    if (!r || r.status === 429 || r.status >= 500) {
+      if (a === "vo") throw new Error(r ? "ntfy " + r.status : "нет сети");
+      queue(body); const it = D.items.find((x) => x.id === id); if (it) { it.status = NEXT[a]; if (text) it.notes = ((it.notes || "") + "\n" + text).trim(); }
+      toast(`${LABEL[a]}: ${id}. ntfy ${r ? "упёрся в дневной лимит" : "недоступен"}, сохранил в очередь: дошлю сам, как откроется.`); render(); return;
+    }
     if (!r.ok) throw new Error("ntfy " + r.status);
     if (a === "vo") {                                // бот ждёт голосовое следующим сообщением: закрываем приложение и идём в чат
       toast("🎙 Бот ждёт голосовое по " + id + ". Запиши его в чате.");
