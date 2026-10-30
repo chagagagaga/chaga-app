@@ -65,7 +65,9 @@ async function load() {
   const plain = await open(await r.arrayBuffer());
   const txt = await new Response(new Blob([plain]).stream().pipeThrough(new DecompressionStream("gzip"))).text();
   if (txt === LAST) return;                        // 30.10: данные не менялись: не перерисовываем (раньше раз в минуту обнулялся ролик)
-  LAST = txt; D = JSON.parse(txt); render();
+  LAST = txt; D = JSON.parse(txt);
+  for (const c of pend()) { const it = c.id && D.items.find((x) => x.id === c.id); if (it && it.status === "you") it.status = c.st; }   // команды из очереди: статус не откатывается
+  render();
 }
 let LAST = "";
 const VID = {};                                     // плееры по пути ролика: переживают перерисовку, позиция и воспроизведение сохраняются
@@ -86,11 +88,11 @@ function toast(t) { let el = document.getElementById("toast"); if (!el) { el = d
 const LABEL = { ap: "✅ Беру", ed: "✏️ Правки", rw: "❌ Переделать", tr: "🗑 В мусор", vo: "🎙 Голосом" }, NEXT = { ap: "approved", ed: "edits", rw: "edits", tr: "rejected" };
 // очередь неотправленных команд (лимит ntfy / нет сети): повтор раз в 2 минуты и при каждом открытии, команды уже зашифрованы
 function pend() { try { return JSON.parse(localStorage.getItem("chaga_pending") || "[]"); } catch (e) { return []; } }
-function queue(body) { const q = pend(); q.push(body); try { localStorage.setItem("chaga_pending", JSON.stringify(q)); } catch (e) {} }
+function queue(body, id, st) { const q = pend(); q.push({ body, id, st }); try { localStorage.setItem("chaga_pending", JSON.stringify(q)); } catch (e) {} }
 async function flush() {
   let q = pend(); if (!q.length || !K) return; const sent = q.length;
   while (q.length) {
-    let r = null; try { r = await fetch("https://ntfy.sh/" + await topic(), { method: "POST", body: q[0] }); } catch (x) {}
+    let r = null; try { r = await fetch("https://ntfy.sh/" + await topic(), { method: "POST", body: q[0].body || q[0] }); } catch (x) {}
     if (!r || !r.ok) break;
     q.shift(); try { localStorage.setItem("chaga_pending", JSON.stringify(q)); } catch (e) {}
   }
@@ -109,7 +111,7 @@ async function act(a, id) {
     // 30.10: лимит ntfy (429, ~250 сообщений в сутки на IP, сброс 00:00 UTC) или нет сети: команда в очередь, приложение дошлёт само
     if (!r || r.status === 429 || r.status >= 500) {
       if (a === "vo") throw new Error(r ? "ntfy " + r.status : "нет сети");
-      queue(body); const it = D.items.find((x) => x.id === id); if (it) { it.status = NEXT[a]; if (text) it.notes = ((it.notes || "") + "\n" + text).trim(); }
+      queue(body, id, NEXT[a]); const it = D.items.find((x) => x.id === id); if (it) { it.status = NEXT[a]; if (text) it.notes = ((it.notes || "") + "\n" + text).trim(); }
       toast(`${LABEL[a]}: ${id}. ntfy ${r ? "упёрся в дневной лимит" : "недоступен"}, сохранил в очередь: дошлю сам, как откроется.`); render(); return;
     }
     if (!r.ok) throw new Error("ntfy " + r.status);
