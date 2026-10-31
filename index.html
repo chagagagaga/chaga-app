@@ -55,6 +55,7 @@
   .note { font-size:14px; color:var(--mute); margin-top:6px; }
   .btns.two { grid-template-columns:1fr 1fr; }
   .post .tm { font-weight:700; min-width:44px; } .post .ttl { flex:1 1 160px; } .post.published { opacity:.75; } .post .err { width:100%; color:#c0392b; font-size:12px; }
+.thg{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:6px 0}.thg figure.best{grid-column:1/-1}.thg figure{margin:0;border-radius:10px;overflow:hidden;border:2px solid transparent}.thg figure.best{border-color:#f2c21a}.thg img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;background:#222}.thg figcaption{font-size:12px;padding:4px 6px;opacity:.85}
 </style>
 </head>
 <body>
@@ -270,7 +271,10 @@ function lvid(v, top) {
   const btns = can ? `<div class="btns two">${v.status !== "approved" ? `<a class="ok" data-a="la" data-id="${esc(v.id)}" href="#">✅ Одобрить</a>` : `<a>✅ Одобрен</a>`}<a data-a="le" data-id="${esc(v.id)}" href="#">✏️ Замечание</a></div>` : "";
   const notes = (v.notes || []).length ? `<details${v.status === "edits" ? " open" : ""}><summary>Твои замечания</summary><div class="text">${esc(v.notes.join("\n"))}</div></details>` : "";
   const err = v.error ? `<div class="note" style="color:var(--bad)">${esc(v.error)}</div>` : "";
-  return `<div class="lvid">${head}<div class="title" style="font-size:16px">${esc(v.title)}</div><div class="chips">${chips}</div>${err}${vid}${btns}${notes}
+  // 31.10: 3 обложки (longform-studio/tools/thumbnail.py), лучшая первой и отмечена ⭐, оценка оценщика 1-10
+  const th = (v.thumbs || []).length ? `<div class="sub">Обложки · ${v.thumbs.length}</div><div class="thg">${v.thumbs.map((t) => `<figure class="${t.best ? "best" : ""}"><img data-img="${esc(t.p)}" alt=""><figcaption>${t.best ? "⭐ лучшая · " : ""}${esc(t.id)}${t.score != null ? " · " + esc(t.score) + "/10" : ""}${t.text ? " · «" + esc(t.text) + "»" : ""}</figcaption></figure>`).join("")}</div>
+    <details><summary>Идеи обложек</summary><div class="text">${esc(v.thumbs.map((t) => `${t.id}${t.best ? " ⭐" : ""}: ${t.concept || ""}`).join("\n"))}</div></details>` : "";
+  return `<div class="lvid">${head}<div class="title" style="font-size:16px">${esc(v.title)}</div><div class="chips">${chips}</div>${err}${th}${vid}${btns}${notes}
     ${(v.history || []).length ? `<details><summary>История</summary><div class="hist">${esc(v.history.join("\n"))}</div></details>` : ""}</div>`;
 }
 async function blobUrl(path, type) {                // часть/картинка: fetch → AES-GCM → objectURL (кэш по пути)
