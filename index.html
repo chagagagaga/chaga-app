@@ -35,6 +35,25 @@
   #toast { position:fixed; left:50%; bottom:24px; transform:translateX(-50%) translateY(120px); background:var(--ink); color:var(--bg); padding:10px 16px; border-radius:12px; font-size:14px; transition:transform .25s; max-width:calc(100% - 32px); z-index:9; }
   #toast.show { transform:translateX(-50%) translateY(0); }
   .post { display:flex; flex-wrap:wrap; gap:6px 10px; align-items:center; padding:8px 0; border-top:1px solid var(--line); font-size:14px; }
+  .sec { font:600 15px/1.3 sans-serif; color:var(--mute); margin:18px 2px 8px; text-transform:uppercase; letter-spacing:.05em; }
+  .sec:first-child { margin-top:4px; }
+  .ch > summary { list-style:none; display:flex; gap:12px; align-items:center; color:var(--ink); }
+  .ch > summary::-webkit-details-marker { display:none; }
+  .ava { flex:none; width:52px; height:52px; border-radius:50%; object-fit:cover; background:var(--chip); display:flex; align-items:center; justify-content:center; font:700 18px Georgia, serif; color:#fff; overflow:hidden; }
+  .ava.sm { width:28px; height:28px; font-size:11px; }
+  .chn { flex:1; min-width:0; } .chn b { font:600 17px/1.25 Georgia, serif; display:block; } .chn small { color:var(--mute); font-size:13px; display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .ban { width:100%; aspect-ratio:16/9; border-radius:10px; margin-top:10px; object-fit:cover; display:block; }
+  .ban.ph { display:flex; align-items:center; justify-content:center; text-align:center; color:#fff; font:600 20px Georgia, serif; padding:12px; aspect-ratio:auto; min-height:90px; }
+  .ban.ph small { display:block; font:400 12px sans-serif; opacity:.8; margin-top:4px; }
+  .sub { font-weight:600; margin:14px 0 4px; }
+  .lvid { border-top:1px solid var(--line); padding-top:10px; margin-top:10px; }
+  .lvid:first-of-type { border-top:0; }
+  .parts { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+  .parts button { border:1px solid var(--line); background:var(--chip); color:var(--ink); border-radius:8px; padding:5px 9px; font-size:13px; }
+  .parts button.on { background:var(--acc); color:#000; border-color:var(--acc); }
+  .lvst { font-size:13px; color:var(--mute); margin-top:4px; }
+  .note { font-size:14px; color:var(--mute); margin-top:6px; }
+  .btns.two { grid-template-columns:1fr 1fr; }
   .post .tm { font-weight:700; min-width:44px; } .post .ttl { flex:1 1 160px; } .post.published { opacity:.75; } .post .err { width:100%; color:#c0392b; font-size:12px; }
 </style>
 </head>
@@ -66,7 +85,10 @@ async function load() {
   const txt = await new Response(new Blob([plain]).stream().pipeThrough(new DecompressionStream("gzip"))).text();
   if (txt === LAST) return;                        // 30.10: данные не менялись: не перерисовываем (раньше раз в минуту обнулялся ролик)
   LAST = txt; D = JSON.parse(txt);
-  for (const c of pend()) { const it = c.id && D.items.find((x) => x.id === c.id); if (it && it.status === "you") it.status = c.st; }   // команды из очереди: статус не откатывается
+  for (const c of pend()) {
+    if (String(c.id || "").startsWith("L-")) { const v = longAll().find((x) => x.id === c.id); if (v && v.status === "ready") setLocal(c.id, c.st, ""); continue; }
+    const it = c.id && D.items.find((x) => x.id === c.id); if (it && it.status === "you") it.status = c.st;
+  }   // команды из очереди: статус не откатывается
   render();
 }
 let LAST = "";
@@ -85,7 +107,12 @@ async function seal(obj) {
   return btoa(String.fromCharCode(...all));
 }
 function toast(t) { let el = document.getElementById("toast"); if (!el) { el = document.createElement("div"); el.id = "toast"; document.body.appendChild(el); } el.textContent = t; el.className = "show"; clearTimeout(el._t); el._t = setTimeout(() => el.className = "", 2600); }
-const LABEL = { ap: "✅ Беру", ed: "✏️ Правки", rw: "❌ Переделать", tr: "🗑 В мусор", vo: "🎙 Голосом" }, NEXT = { ap: "approved", ed: "edits", rw: "edits", tr: "rejected" };
+const LABEL = { ap: "✅ Беру", ed: "✏️ Правки", rw: "❌ Переделать", tr: "🗑 В мусор", vo: "🎙 Голосом", la: "✅ Одобрено", le: "✏️ Замечание" }, NEXT = { ap: "approved", ed: "edits", rw: "edits", tr: "rejected", la: "L:approved", le: "L:edits" };
+// локальный статус после кнопки (до подтверждения ботом): короткие в D.items, длинные (id L-...) в D.long
+function setLocal(id, st, text) {
+  if (String(id).startsWith("L-")) { const v = longAll().find((x) => x.id === id); if (v && st) { v.status = st.replace(/^L:/, ""); v.label = (D.long.statuses || {})[v.status] || v.status; if (text) (v.notes = v.notes || []).push("сейчас " + text); } return; }
+  const it = D.items.find((x) => x.id === id); if (it) { it.status = st; if (text) it.notes = ((it.notes || "") + "\n" + text).trim(); }
+}
 // очередь неотправленных команд (лимит ntfy / нет сети): повтор раз в 2 минуты и при каждом открытии, команды уже зашифрованы
 function pend() { try { return JSON.parse(localStorage.getItem("chaga_pending") || "[]"); } catch (e) { return []; } }
 function queue(body, id, st) { const q = pend(); q.push({ body, id, st }); try { localStorage.setItem("chaga_pending", JSON.stringify(q)); } catch (e) {} }
@@ -101,7 +128,7 @@ async function flush() {
 setInterval(flush, 120e3); setTimeout(flush, 3e3);
 async function act(a, id) {
   let text = "";
-  if (a === "ed" || a === "rw") { text = prompt(a === "ed" ? "Правки к карточке (одним сообщением):" : "Что не так? (можно пусто)") ?? null; if (text === null) return; if (a === "ed" && !text.trim()) return;
+  if (a === "ed" || a === "rw" || a === "le") { text = prompt(a === "ed" ? "Правки к карточке (одним сообщением):" : a === "le" ? "Замечание к длинному ролику (одним сообщением):" : "Что не так? (можно пусто)") ?? null; if (text === null) return; if ((a === "ed" || a === "le") && !text.trim()) return;
   }
   try {
     const body = await seal({ a, id, text: text.trim(), ts: Date.now(), n: crypto.getRandomValues(new Uint32Array(2)).join("") });
@@ -111,7 +138,7 @@ async function act(a, id) {
     // 30.10: лимит ntfy (429, ~250 сообщений в сутки на IP, сброс 00:00 UTC) или нет сети: команда в очередь, приложение дошлёт само
     if (!r || r.status === 429 || r.status >= 500) {
       if (a === "vo") throw new Error(r ? "ntfy " + r.status : "нет сети");
-      queue(body, id, NEXT[a]); const it = D.items.find((x) => x.id === id); if (it) { it.status = NEXT[a]; if (text) it.notes = ((it.notes || "") + "\n" + text).trim(); }
+      queue(body, id, NEXT[a]); setLocal(id, NEXT[a], text.trim());
       toast(`${LABEL[a]}: ${id}. ntfy ${r ? "упёрся в дневной лимит" : "недоступен"}, сохранил в очередь: дошлю сам, как откроется.`); render(); return;
     }
     if (!r.ok) throw new Error("ntfy " + r.status);
@@ -120,7 +147,7 @@ async function act(a, id) {
       if (TG) setTimeout(() => TG.close(), 700); else setTimeout(() => { location.href = "https://t.me/chaga_cartoons_bot"; }, 700);
       return;
     }
-    const it = D.items.find((x) => x.id === id); if (it) { it.status = NEXT[a]; if (text) it.notes = ((it.notes || "") + "\n" + text).trim(); }
+    setLocal(id, NEXT[a], text.trim());
     toast(`${LABEL[a]}: ${id}. Бот запишет за полминуты.`); render();
   } catch (e) { toast("Не отправилось: " + e.message + ". Попробуй ещё раз."); }
 }
@@ -135,14 +162,21 @@ function render() {
   const items = D.items, tabs = document.getElementById("tabs");
   const up = (D.posts || []).filter((p) => p.status === "scheduled").length;
   const tabList = [...Object.entries(YOU).map(([k, v]) => [k, v[0]]), ...Object.entries(D.status).filter(([k]) => k !== "you")];
-  tabs.innerHTML = tabList.map(([k, v]) => {
+  const btn = ([k, v]) => {
     const n = items.filter((i) => inTab(i, k)).length;
     return `<button class="${k === TAB ? "on" : ""}" data-t="${esc(k)}">${esc(v)}${n ? " " + n : ""}</button>`;
-  }).join("") + `<button class="${TAB === "cal" ? "on" : ""}" data-t="cal">📅 Выкладка${up ? " " + up : ""}</button>`;
+  };
+  // 31.10: «🎞 Длинные» третьей кнопкой, сразу после двух «Ждут тебя»; 👀N = длинные, ждущие проверки
+  const lw = longAll().filter((v) => v.status === "ready").length;
+  const lb = `<button class="${TAB === "long" ? "on" : ""}" data-t="long">🎞 Длинные${lw ? " 👀" + lw : ""}</button>`;
+  tabs.innerHTML = tabList.slice(0, 2).map(btn).join("") + lb + tabList.slice(2).map(btn).join("")
+    + `<button class="${TAB === "cal" ? "on" : ""}" data-t="cal">📅 Выкладка${up ? " " + up : ""}</button>`;
   tabs.querySelectorAll("button").forEach((b) => b.onclick = () => { TAB = b.dataset.t; try { localStorage.setItem("chaga_tab", TAB); } catch (e) {} render(); });
   const list = items.filter((i) => inTab(i, TAB));
   const playing = Object.values(VID).filter((v) => !v.paused && !v.ended);
-  document.getElementById("list").innerHTML = TAB === "cal" ? calendar() : list.length ? list.map(card).join("") : `<div class="empty">Пусто</div>`;
+  Object.values(LP).forEach((o) => { o.was = !o.v.paused && !o.v.ended; });   // длинные: снятый с экрана плеер браузер ставит на паузу
+  document.getElementById("list").innerHTML = TAB === "cal" ? calendar() : TAB === "long" ? longView() : list.length ? list.map(card).join("") : `<div class="empty">Пусто</div>`;
+  if (TAB === "long") longMount();
   document.querySelectorAll("[data-a]").forEach((b) => b.onclick = (e) => { e.preventDefault(); act(b.dataset.a, b.dataset.id); });
   document.querySelectorAll("details[data-v]").forEach((d) => {
     const v = VID[d.dataset.v]; if (v) { d.querySelector("video").replaceWith(v); d.dataset.done = 1; if (playing.includes(v)) v.play().catch(() => {}); }
@@ -180,6 +214,99 @@ function card(i) {
     ${i.notes ? `<details open><summary>Твои правки</summary><div class="text">${esc(i.notes)}</div></details>` : ""}
     ${btns}
     ${(i.history || []).length ? `<details><summary>История</summary><div class="hist">${esc(i.history.slice(-8).join("\n"))}</div></details>` : ""}</div>`;
+}
+// ===== 31.10 «🎞 Длинные»: 10 каналов сети longform-studio + Chaga Movies long (данные engine/long_sync.py) =====
+const longAll = () => ((D && D.long && D.long.channels) || []).flatMap((c) => (c.videos || []).map((v) => Object.assign(v, { _ch: c })));
+const LOPEN = new Set(JSON.parse((() => { try { return localStorage.getItem("chaga_lopen") || "[]"; } catch (e) { return "[]"; } })()));
+const IMG = {}, LP = {}, PURL = {};                 // картинки, плееры длинных, расшифрованные части (переживают перерисовку)
+const mmss = (s) => s == null ? "" : `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`;
+const hue = (s) => { let h = 0; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
+const initials = (n) => String(n).split(/\s+/).filter((w) => !/^the$/i.test(w)).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
+function ava(c, sm) {
+  const cls = "ava" + (sm ? " sm" : "");
+  return c.avatar ? `<img class="${cls}" data-img="${esc(c.avatar)}" alt="">` : `<div class="${cls}" style="background:hsl(${hue(c.slug)} 45% 38%)">${esc(initials(c.name))}</div>`;
+}
+function longView() {
+  const L = D.long;
+  if (!L || L.error || !L.channels) return `<div class="empty">Раздел длинных пока не собрался${L && L.error ? ": " + esc(L.error) : ""}.</div>`;
+  const all = longAll(), wait = all.filter((v) => v.status === "ready");
+  let h = `<div class="sec">👀 Ждут проверки · ${wait.length}</div>`;
+  h += wait.length ? wait.map((v) => `<div class="card">${lvid(v, true)}</div>`).join("")
+    : `<div class="card note">Готовых длинных пока нет. Как только у ролика появится финальный mp4, он встанет сюда с видео и кнопками.</div>`;
+  const ok = all.filter((v) => v.status === "approved").length, work = all.filter((v) => ["voiced", "anim", "render", "edits"].includes(v.status)).length;
+  h += `<div class="sec">Каналы · ${L.channels.length} · в работе ${work}${ok ? " · одобрено " + ok : ""}</div>`;
+  return h + L.channels.map(chCard).join("");
+}
+function chCard(c) {
+  const st = (c.videos || []).map((v) => `<span class="chip">${esc(v.label)}</span>`).join("");
+  const ban = c.banner ? `<img class="ban" data-img="${esc(c.banner)}" alt="">`
+    : `<div class="ban ph" style="background:linear-gradient(120deg,hsl(${hue(c.slug)} 45% 30%),hsl(${(hue(c.slug) + 40) % 360} 50% 45%))"><div>${esc(c.name)}<small>${c.chaga ? "баннер и аватарка: позже" : "баннер и аватарка появятся после prompts/BRAND.md"}</small></div></div>`;
+  const sample = c.sample ? `<details><summary>Пробный кадр стиля</summary><img class="ban" data-img="${esc(c.sample)}" alt=""></details>` : "";
+  const meta = [c.wave ? `волна ${c.wave}` : "", c.niche].filter(Boolean).join(" · ");
+  const about = c.about ? `<div class="sub">About</div><div class="text" style="margin-top:0">${esc(c.about)}</div>` : "";
+  const alt = (c.alt || []).length || (c.handles || []).length ? `<div class="note">${c.alt.length ? "Другие названия: " + esc(c.alt.join(", ")) : ""}${c.handles.length ? `<br>Хэндлы: ${esc(c.handles.join(" "))}` : ""}</div>` : "";
+  const vids = (c.videos || []).map((v) => lvid(v, false)).join("") || `<div class="note">Роликов пока нет.</div>`;
+  const scr = (c.scripts || []).map((s) => `<div class="lvid"><div><b>${esc(s.topic || s.title)}</b></div>
+    <div class="chips">${s.words ? `<span class="chip">${esc(s.words)} слов</span>` : ""}${s.minutes ? `<span class="chip">~${esc(s.minutes)} мин</span>` : ""}${(s.chapters || []).length ? `<span class="chip">${s.chapters.length} глав</span>` : ""}</div>
+    ${s.title && s.title !== s.topic ? `<div class="note">Название: ${esc(s.title)}</div>` : ""}
+    ${(s.alt_titles || []).length > 1 ? `<details><summary>Варианты названия (A/B)</summary><div class="text">${esc(s.alt_titles.join("\n"))}</div></details>` : ""}
+    ${s.desc ? `<div class="note">Описание: ${esc(s.desc)}</div>` : ""}
+    <details><summary>Текст (EN)</summary><div class="text">${esc(s.text)}</div></details>
+    <details><summary>Перевод (RU)</summary><div class="text">${esc(s.ru || s.ru_note || "Перевода нет.")}</div></details></div>`).join("");
+  const top = (c.topics || []).length ? `<details><summary>Очередь тем · ${c.topics.length}</summary><div class="text">${esc(c.topics.map((t, i) => `${i + 1}. ${t.title}`).join("\n"))}</div></details>` : "";
+  return `<details class="card ch" data-ch="${esc(c.slug)}"${LOPEN.has(c.slug) ? " open" : ""}><summary>${ava(c)}<div class="chn"><b>${esc(c.name)}</b><small>${esc(meta)}</small><div class="chips">${st}</div></div></summary>
+    ${ban}${sample}${about}${alt}<div class="sub">Ролики</div>${vids}<div class="sub">Сценарии</div>${scr}${top}</details>`;
+}
+function lvid(v, top) {
+  const c = v._ch, chips = [v.label, v.duration ? mmss(v.duration) : v.voice_s ? `голос ${mmss(v.voice_s)}` : "", v.stage, top ? "" : v.updated].filter(Boolean).map((x) => `<span class="chip">${esc(x)}</span>`).join("");
+  const head = top ? `<div class="top"><span style="display:flex;gap:8px;align-items:center">${ava(c, true)}${esc(c.name)}</span><span>${esc(v.updated || "")}</span></div>` : "";
+  let vid = "";
+  if (v.video && (v.video.parts || []).length) {
+    const P = v.video.parts;
+    vid = `<div data-lv="${esc(v.id)}@${top ? "t" : "c"}" data-parts='${esc(JSON.stringify(P))}'><div class="parts">${P.map((p, k) => `<button data-k="${k}">${P.length > 1 ? "Часть " + (k + 1) + " · " : "▶ "}${mmss(p.at)}</button>`).join("")}</div>
+      <video controls playsinline preload="none" style="display:none"></video><div class="lvst">720p · ${esc(v.video.mb || "")} МБ всего · ${P.length > 1 ? P.length + " частей по 4 мин, следующая включается сама" : "одна часть"}</div></div>`;
+  } else if (v.vnote) vid = `<div class="note">${esc(v.vnote)}</div>`;
+  const can = ["ready", "edits", "approved"].includes(v.status);
+  const btns = can ? `<div class="btns two">${v.status !== "approved" ? `<a class="ok" data-a="la" data-id="${esc(v.id)}" href="#">✅ Одобрить</a>` : `<a>✅ Одобрен</a>`}<a data-a="le" data-id="${esc(v.id)}" href="#">✏️ Замечание</a></div>` : "";
+  const notes = (v.notes || []).length ? `<details${v.status === "edits" ? " open" : ""}><summary>Твои замечания</summary><div class="text">${esc(v.notes.join("\n"))}</div></details>` : "";
+  const err = v.error ? `<div class="note" style="color:var(--bad)">${esc(v.error)}</div>` : "";
+  return `<div class="lvid">${head}<div class="title" style="font-size:16px">${esc(v.title)}</div><div class="chips">${chips}</div>${err}${vid}${btns}${notes}
+    ${(v.history || []).length ? `<details><summary>История</summary><div class="hist">${esc(v.history.join("\n"))}</div></details>` : ""}</div>`;
+}
+async function blobUrl(path, type) {                // часть/картинка: fetch → AES-GCM → objectURL (кэш по пути)
+  if (!PURL[path]) PURL[path] = fetch(path).then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.arrayBuffer(); }).then(open).then((p) => URL.createObjectURL(new Blob([p], { type })));
+  try { return await PURL[path]; } catch (e) { delete PURL[path]; throw e; }
+}
+function dropUrl(path) { const p = PURL[path]; if (p) { delete PURL[path]; p.then((u) => URL.revokeObjectURL(u)).catch(() => {}); } }
+function longMount() {
+  document.querySelectorAll("details.ch").forEach((d) => d.addEventListener("toggle", () => { d.open ? LOPEN.add(d.dataset.ch) : LOPEN.delete(d.dataset.ch); try { localStorage.setItem("chaga_lopen", JSON.stringify([...LOPEN])); } catch (e) {} }));
+  document.querySelectorAll("img[data-img]").forEach((im) => {
+    const p = im.dataset.img; if (IMG[p]) { im.src = IMG[p]; return; }
+    blobUrl(p, "image/jpeg").then((u) => { IMG[p] = u; im.src = u; }).catch(() => {});
+  });
+  document.querySelectorAll("[data-lv]").forEach((box) => {
+    const key = box.dataset.lv, old = LP[key];
+    if (old && old.parts === box.dataset.parts) { box.replaceWith(old.el); if (old.was) old.v.play().catch(() => {}); return; }
+    const P = JSON.parse(box.dataset.parts), v = box.querySelector("video"), st = box.querySelector(".lvst");
+    const S = LP[key] = { el: box, v, parts: box.dataset.parts, k: -1, playing: false };
+    const base = st.textContent;
+    const mark = () => box.querySelectorAll(".parts button").forEach((b) => b.classList.toggle("on", +b.dataset.k === S.k));
+    async function play(k, auto) {
+      if (k < 0 || k >= P.length) return;
+      S.k = k; mark(); v.style.display = ""; st.textContent = `Часть ${k + 1} из ${P.length}: загружаю ${P[k].mb} МБ…`;
+      try {
+        const u = await blobUrl(P[k].p, "video/mp4"); if (S.k !== k) return;
+        v.src = u; st.textContent = `Часть ${k + 1} из ${P.length} · ${mmss(P[k].at)}-${mmss(P[k].at + P[k].d)} · ${base}`;
+        if (auto) v.play().catch(() => {});
+        for (const [j, p] of P.entries()) if (Math.abs(j - k) > 1) dropUrl(p.p);   // в памяти не больше трёх частей
+        if (k + 1 < P.length) blobUrl(P[k + 1].p, "video/mp4").catch(() => {});      // следующую качаем заранее
+      } catch (e) { st.textContent = `Часть ${k + 1}: не загрузилась (${e.message}). Нажми ещё раз.`; }
+    }
+    box.querySelectorAll(".parts button").forEach((b) => b.onclick = () => play(+b.dataset.k, true));
+    v.addEventListener("ended", () => { S.playing = false; play(S.k + 1, true); });
+    v.addEventListener("play", () => { S.playing = true; for (const o of Object.values(LP)) if (o !== S && !o.v.paused) o.v.pause(); });
+    v.addEventListener("pause", () => { S.playing = false; });
+  });
 }
 load().catch((e) => document.getElementById("msg").textContent = "Не открылось: " + e.message);
 setInterval(() => load().catch(() => {}), 60000);
