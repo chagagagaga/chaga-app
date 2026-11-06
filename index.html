@@ -82,10 +82,33 @@ async function open(buf) {
   const u = new Uint8Array(buf);                   // subarray: без лишней копии (на iPhone память дорогая)
   return crypto.subtle.decrypt({ name: "AES-GCM", iv: u.slice(0, 12) }, ck, u.subarray(12));
 }
+// 06.11 (письма «pages build failed»: сайт Pages возил ~400 МБ видео и выкладывался на каждый апдейт): данные лежат в
+// ветке appdata, видео v/ и части длинных lv/ в ветке appmedia того же репозитория, на Pages только страница.
+// Данные: GitHub API (свежие сразу) -> raw (кэш CDN до 5 мин) -> старый путь на Pages. Медиа: raw (без лимита API,
+// имена с хэшем не меняются) -> API -> Pages. API без токена = 60 запросов в час на IP: при 403/429 API на 15 мин пропускаем.
+const GH_API = "https://api.github.com/repos/chagagagaga/chaga-app/contents/", GH_RAW = "https://raw.githubusercontent.com/chagagagaga/chaga-app/";
+let API_OFF = 0;
+async function fetchFirst(srcs) {
+  let last = null;
+  for (const s of srcs) {
+    if (s.api && Date.now() < API_OFF) continue;
+    try {
+      const r = await fetch(s.u, s.init || {});
+      if (r.ok) return r;
+      if (s.api && (r.status === 403 || r.status === 429)) API_OFF = Date.now() + 15 * 60e3;
+      last = new Error("HTTP " + r.status);
+    } catch (e) { last = e; }
+  }
+  throw last || new Error("нет источника");
+}
+const RAWH = { headers: { Accept: "application/vnd.github.raw" } };
+const dataSrcs = () => [{ u: GH_API + "data.bin?ref=appdata", api: true, init: { ...RAWH, cache: "no-cache" } },
+  { u: GH_RAW + "appdata/data.bin?t=" + Date.now(), init: { cache: "no-store" } }, { u: "data.bin?" + Date.now(), init: { cache: "no-store" } }];
+const mediaSrcs = (p) => [{ u: GH_RAW + "appmedia/" + p }, { u: GH_API + p + "?ref=appmedia", api: true, init: RAWH }, { u: p }];
 async function load() {
   if (!K) { document.getElementById("msg").textContent = "Нет ключа: открой ссылку из бота (/app)."; return; }
   try { localStorage.setItem("chaga_k", K); } catch (e) {}
-  const r = await fetch("data.bin?" + Date.now(), { cache: "no-store" });
+  const r = await fetchFirst(dataSrcs());
   const plain = await open(await r.arrayBuffer());
   const txt = await new Response(new Blob([plain]).stream().pipeThrough(new DecompressionStream("gzip"))).text();
   if (txt === LAST) return;                        // 30.10: данные не менялись: не перерисовываем (раньше раз в минуту обнулялся ролик)
@@ -160,7 +183,9 @@ async function video(el, path) {
   if (el.dataset.done) return; el.dataset.done = 1;
   if (VID[path]) return;
   const v = el.querySelector("video"); VID[path] = v;
-  const r = await fetch(path); const plain = await open(await r.arrayBuffer());
+  let plain;
+  try { const r = await fetchFirst(mediaSrcs(path)); plain = await open(await r.arrayBuffer()); }
+  catch (e) { delete el.dataset.done; delete VID[path]; return; }   // 06.11: не залип: при следующей отрисовке попробует снова
   v.src = URL.createObjectURL(new Blob([plain], { type: "video/mp4" }));
 }
 function render() {
@@ -344,7 +369,7 @@ function review(v) {
 // часть/картинка: fetch (с прогрессом) → AES-GCM → objectURL, кэш по пути. 01.11: части длинных теперь 20/60 с (~2-7 МБ,
 // как короткие ~12 МБ, которые на iPhone играют), раньше 4 мин ~36 МБ качались 70+ с при 0.5 МБ/с без прогресса.
 async function fetchBuf(path, onp) {
-  const r = await fetch(path); if (!r.ok) throw new Error("HTTP " + r.status);
+  const r = await fetchFirst(mediaSrcs(path));
   const tot = +r.headers.get("content-length") || 0;
   if (!onp || !r.body || !r.body.getReader) return r.arrayBuffer();
   const rd = r.body.getReader(), out = tot ? new Uint8Array(tot) : null, ch = []; let got = 0;
