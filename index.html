@@ -330,7 +330,8 @@ function lvid(v, top) {
   else if (!play) vid = "";
   else if (v.video && (v.video.parts || []).length) {
     const P = v.video.parts;
-    vid = `<div data-lv="${esc(v.id)}@${top ? "t" : "c"}" data-parts='${esc(JSON.stringify(P))}'><div class="parts">${P.map((p, k) => `<button data-k="${k}">${P.length > 1 ? "Часть " + (k + 1) + " · " : "▶ "}${mmss(p.at)}</button>`).join("")}</div>
+    // 07.11 (Алексей: «вижу только обложки, ролик посмотреть не могу»): большая кнопка «Смотреть» = часть 1, дальше части идут сами
+    vid = `<div data-lv="${esc(v.id)}@${top ? "t" : "c"}" data-parts='${esc(JSON.stringify(P))}'><div class="btns"><a class="ok" data-k="0" href="#">▶ Смотреть ролик${v.duration ? " · " + mmss(v.duration) : ""}</a></div><div class="parts">${P.map((p, k) => `<button data-k="${k}">${P.length > 1 ? "Часть " + (k + 1) + " · " : "▶ "}${mmss(p.at)}</button>`).join("")}</div>
       <video controls playsinline preload="none" style="display:none"></video><div class="lvst">720p · ${esc(v.video.mb || "")} МБ всего · ${P.length > 1 ? P.length + " частей, следующая включается сама" : "одна часть"}</div></div>`;
   } else if (v.vnote) vid = `<div class="note">${esc(v.vnote)}</div>`;
   const can = play && ["ready", "edits", "approved"].includes(v.status);
@@ -432,7 +433,7 @@ function longMount() {
         if (k + 1 < P.length) blobUrl(P[k + 1].p, "video/mp4").catch(() => {});      // следующую качаем заранее
       } catch (e) { say(`Часть ${k + 1}: не загрузилась (${e.message || e}). Нажми на часть ещё раз.`, true); }
     }
-    box.querySelectorAll(".parts button").forEach((b) => b.onclick = () => play(+b.dataset.k, true, true));
+    box.querySelectorAll(".parts button, a[data-k]").forEach((b) => b.onclick = (e) => { e.preventDefault(); play(+b.dataset.k, true, true); });
     v.addEventListener("error", () => {             // 01.11: ошибка плеера видна на экране, а не тишина
       const c = v.error && v.error.code, why = { 1: "прервано", 2: "сеть", 3: "не декодируется", 4: "формат не поддерживается" }[c] || "неизвестно";
       if (S.k >= 0 && v.getAttribute("src")) say(`Часть ${S.k + 1}: плеер не смог включить видео (${why}, код ${c}). Нажми на часть ещё раз.`, true);
