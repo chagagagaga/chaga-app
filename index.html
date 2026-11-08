@@ -57,6 +57,8 @@
   .btns.two { grid-template-columns:1fr 1fr; }
   .post .tm { font-weight:700; min-width:44px; } .post .ttl { flex:1 1 160px; } .post.published { opacity:.75; } .post .err { width:100%; color:#c0392b; font-size:12px; }
   .lvst.err { color:var(--bad); }
+  .bar { height:8px; background:var(--line); border-radius:4px; overflow:hidden; margin-top:6px; }
+  .bar i { display:block; height:100%; width:0; background:var(--ok); transition:width .2s; }
   .rv { margin-top:8px; } .rv .chip.ok { background:var(--ok); color:#fff; } .rv .chip.no { background:var(--bad); color:#fff; }
   .rnd { border-top:1px dashed var(--line); padding-top:6px; margin-top:6px; font-size:14px; }
 .thg{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:6px 0}.thg figure.best{grid-column:1/-1}.thg figure{margin:0;border-radius:10px;overflow:hidden;border:2px solid transparent}.thg figure.best{border-color:#f2c21a}.thg img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;background:#222}.thg figcaption{font-size:12px;padding:4px 6px;opacity:.85}
@@ -188,7 +190,9 @@ async function video(el, path, gesture) {
   if (gesture) { try { v.play().catch(() => {}); } catch (e) {} }   // iPhone: «будим» плеер в самом нажатии
   say("загружаю…");
   try {
-    const u = await blobUrl(path, "video/mp4", (g, t) => say(`загружаю ${(g / 1e6).toFixed(1)}${t ? " из " + (t / 1e6).toFixed(1) : ""} МБ…`));
+    bar(el, 0, 0);
+    const u = await blobUrl(path, "video/mp4", (g, t) => { bar(el, g, t); say(`загружаю ${(g / 1e6).toFixed(1)}${t ? " из " + (t / 1e6).toFixed(1) : ""} МБ${t ? " · " + Math.round(g / t * 100) + "%" : ""}…`); });
+    const bb = el.querySelector(".bar"); if (bb) bb.style.display = "none"; say("");
     for (const [p, o] of Object.entries(VID)) if (p !== path && o.paused) { dropUrl(p); o.removeAttribute("src"); o.load(); delete VID[p]; }
     if (v.getAttribute("src") !== u) v.src = u;
     VID[path] = v; v.style.display = ""; const b = el.querySelector(".vst"); if (b) b.style.display = "none";
@@ -220,7 +224,7 @@ function render() {
     const v = VID[d.dataset.v]; if (v) { d.querySelector("video").replaceWith(v); v.style.display = ""; const s = d.querySelector(".vst"); if (s) s.style.display = "none"; if (playing.includes(v)) v.play().catch(() => {}); }
     const b = d.querySelector(".vbtn"); if (b) b.onclick = (e) => { e.preventDefault(); video(d, d.dataset.v, true); };
   });
-  const last = D.at || items.map((i) => i.updated).filter(Boolean)[0]; document.getElementById("upd").textContent = last ? "данные от " + last : "";
+  const last = D.at || items.map((i) => i.updated).filter(Boolean)[0]; document.getElementById("upd").textContent = (last ? "данные от " + last : "") + " · v" + APPV;
 }
 // 01.11: содержимое вкладки коротких. «🎬 Ролики ждут тебя» = длинные ГОТОВ + короткие на решении (только финальное),
 // «⚙️ В работе» = ролики фабрики сейчас; скрытое (пробные, брошенные версии) только счётчиком, в базе оно цело.
@@ -263,7 +267,7 @@ function card(i) {
   const flag = i.lang === "en" ? "🇺🇸" : "🇷🇺", kind = i.kind === "reel" ? "🎬 Ролик" : "📝 Сценарий";
   const sc = Object.entries(i.scores || {}).map(([k, v]) => `<span class="chip ${v >= 8 ? "hi" : v < 7 ? "lo" : ""}">${esc(k)} ${esc(v)}</span>`).join("");
   const meta = [i.rubric, i.style, i.seconds ? `~${i.seconds} с` : "", i.stage].filter(Boolean).map((x) => `<span class="chip">${esc(x)}</span>`).join("");
-  const vid = i.video ? `<details data-v="${esc(i.video)}" open><summary>Видео</summary><div class="vst btns"><a class="ok vbtn" href="#">▶ Смотреть</a><div class="vmsg lvst"></div></div><video controls playsinline preload="none" style="display:none"></video></details>` : "";
+  const vid = i.video ? `<details data-v="${esc(i.video)}" open><summary>Видео</summary><div class="vst btns"><a class="ok vbtn" href="#">▶ Смотреть</a></div><div class="bar" style="display:none"><i></i></div><div class="vmsg lvst"></div><video controls playsinline preload="none" style="display:none"></video></details>` : "";
   const btns = i.status === "you" ? `<div class="btns"><a class="ok" data-a="ap" data-id="${esc(i.id)}" href="#">✅ Беру</a><a data-a="ed" data-id="${esc(i.id)}" href="#">✏️ Правки</a><a data-a="vo" data-id="${esc(i.id)}" href="#">🎙 Голосом</a><a data-a="rw" data-id="${esc(i.id)}" href="#">❌ Переделать</a><a data-a="tr" data-id="${esc(i.id)}" href="#">🗑 Мусор</a></div>` : "";
   return `<div class="card"><div class="top"><span>${kind} ${flag} ${esc(i.id)}</span><span>${esc(i.updated || "")}</span></div>
     <div class="title">${esc(i.title)}</div><div class="chips">${meta}</div><div class="chips">${sc}</div>${vid}
@@ -339,7 +343,7 @@ function lvid(v, top) {
     const P = v.video.parts;
     // 07.11 (Алексей: «вижу только обложки, ролик посмотреть не могу»): большая кнопка «Смотреть» = часть 1, дальше части идут сами
     vid = `<div data-lv="${esc(v.id)}@${top ? "t" : "c"}" data-parts='${esc(JSON.stringify(P))}'><div class="btns"><a class="ok" data-k="0" href="#">▶ Смотреть ролик${v.duration ? " · " + mmss(v.duration) : ""}</a></div><div class="parts">${P.map((p, k) => `<button data-k="${k}">${P.length > 1 ? "Часть " + (k + 1) + " · " : "▶ "}${mmss(p.at)}</button>`).join("")}</div>
-      <video controls playsinline preload="none" style="display:none"></video><div class="lvst">720p · ${esc(v.video.mb || "")} МБ всего · ${P.length > 1 ? P.length + " частей, следующая включается сама" : "одна часть"}</div></div>`;
+      <video controls playsinline preload="none" style="display:none"></video><div class="bar" style="display:none"><i></i></div><div class="lvst">720p · ${esc(v.video.mb || "")} МБ всего · ${P.length > 1 ? P.length + " частей, следующая включается сама" : "одна часть"}</div></div>`;
   } else if (v.vnote) vid = `<div class="note">${esc(v.vnote)}</div>`;
   const can = play && ["ready", "edits", "approved"].includes(v.status);
   const btns = can ? `<div class="btns two">${v.status !== "approved" ? `<a class="ok" data-a="la" data-id="${esc(v.id)}" href="#">✅ Одобрить</a>` : `<a>✅ Одобрен</a>`}<a data-a="le" data-id="${esc(v.id)}" href="#">✏️ Замечание</a></div>` : "";
@@ -441,7 +445,8 @@ function longMount() {
       say(`Часть ${k + 1} из ${P.length}: загружаю ${P[k].mb} МБ…`);
       const t0 = Date.now();
       try {
-        const u = await blobUrl(P[k].p, "video/mp4", (g, t) => { if (S.k === k) say(`Часть ${k + 1} из ${P.length}: загружаю ${(g / 1e6).toFixed(1)} из ${((t || P[k].mb * 1e6) / 1e6).toFixed(1)} МБ${Date.now() - t0 > 20e3 ? " (медленная сеть)" : ""}…`); });
+        const u = await blobUrl(P[k].p, "video/mp4", (g, t) => { if (S.k === k) { bar(box, g, t || P[k].mb * 1e6); say(`Часть ${k + 1} из ${P.length}: загружаю ${(g / 1e6).toFixed(1)} из ${((t || P[k].mb * 1e6) / 1e6).toFixed(1)} МБ${Date.now() - t0 > 20e3 ? " (медленная сеть)" : ""}…`); } });
+        { const bb = box.querySelector(".bar"); if (bb) bb.style.display = "none"; }
         if (S.k !== k) return;
         if (v.getAttribute("src") !== u) v.src = u;
         say(`${info(k)} · ${base}`);
