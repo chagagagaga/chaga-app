@@ -376,20 +376,30 @@ function review(v) {
 }
 // часть/картинка: fetch (с прогрессом) → AES-GCM → objectURL, кэш по пути. 01.11: части длинных теперь 20/60 с (~2-7 МБ,
 // как короткие ~12 МБ, которые на iPhone играют), раньше 4 мин ~36 МБ качались 70+ с при 0.5 МБ/с без прогресса.
+// 08.11 (Алексей: «ни хрена не грузится»): у каждого источника сторож. Нет ответа или байтов 20 с — обрываем
+// и берём следующий источник (raw → API → Pages), а не висим молча на «загружаю».
 async function fetchBuf(path, onp) {
-  const r = await fetchFirst(mediaSrcs(path));
-  const tot = +r.headers.get("content-length") || 0;
-  if (!onp || !r.body || !r.body.getReader) return r.arrayBuffer();
-  const rd = r.body.getReader(), out = tot ? new Uint8Array(tot) : null, ch = []; let got = 0;
-  for (;;) {
-    const { done, value } = await rd.read(); if (done) break;
-    if (out && got + value.length <= tot) out.set(value, got); else ch.push(value);
-    got += value.length; onp(got, tot);
+  let last = null;
+  for (const s of mediaSrcs(path)) {
+    if (s.api && Date.now() < API_OFF) continue;
+    const ac = new AbortController(); let tm = setTimeout(() => ac.abort(), 20e3);
+    const kick = () => { clearTimeout(tm); tm = setTimeout(() => ac.abort(), 20e3); };
+    try {
+      const r = await fetch(s.u, { ...(s.init || {}), signal: ac.signal });
+      if (!r.ok) { if (s.api && (r.status === 403 || r.status === 429)) API_OFF = Date.now() + 15 * 60e3; last = new Error("HTTP " + r.status); clearTimeout(tm); continue; }
+      kick();
+      const tot = +r.headers.get("content-length") || 0;
+      if (!r.body || !r.body.getReader) { const b = await r.arrayBuffer(); clearTimeout(tm); if (onp) onp(b.byteLength, b.byteLength); return b; }
+      const rd = r.body.getReader(), ch = []; let got = 0;
+      for (;;) { const { done, value } = await rd.read(); if (done) break; kick(); ch.push(value); got += value.length; if (onp) onp(got, tot); }
+      clearTimeout(tm);
+      const all = new Uint8Array(got); let o = 0; for (const c of ch) { all.set(c, o); o += c.length; } return all.buffer;
+    } catch (e) { clearTimeout(tm); last = e.name === "AbortError" ? new Error("источник молчит 20 с, пробую другой") : e; if (onp) onp(0, 0); }
   }
-  if (out && !ch.length && got === tot) return out.buffer;
-  const all = new Uint8Array(got); let o = 0; if (out) { all.set(out.subarray(0, Math.min(got, tot)), 0); o = Math.min(got, tot); }
-  for (const c of ch) { all.set(c, o); o += c.length; } return all.buffer;
+  throw last || new Error("нет источника");
 }
+const APPV = "08.11c";   // версия страницы в шапке: видно, что телефон открыл новую
+function bar(el, g, t) { const b = el && el.querySelector(".bar i"); if (b) { b.parentNode.style.display = ""; b.style.width = (t ? Math.min(100, g / t * 100) : 5) + "%"; } }
 async function blobUrl(path, type, onp) {
   if (!PURL[path]) PURL[path] = fetchBuf(path, (g, t) => { const f = PROG[path]; if (f) f(g, t); }).then(open).then((p) => URL.createObjectURL(new Blob([p], { type })));
   if (onp) PROG[path] = onp;
