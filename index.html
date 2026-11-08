@@ -179,14 +179,21 @@ async function act(a, id) {
     toast(`${LABEL[a]}: ${id}. Бот запишет за полминуты.`); render();
   } catch (e) { toast("Не отправилось: " + e.message + ". Попробуй ещё раз."); }
 }
-async function video(el, path) {
-  if (el.dataset.done) return; el.dataset.done = 1;
-  if (VID[path]) return;
-  const v = el.querySelector("video"); VID[path] = v;
-  let plain;
-  try { const r = await fetchFirst(mediaSrcs(path)); plain = await open(await r.arrayBuffer()); }
-  catch (e) { delete el.dataset.done; delete VID[path]; return; }   // 06.11: не залип: при следующей отрисовке попробует снова
-  v.src = URL.createObjectURL(new Blob([plain], { type: "video/mp4" }));
+// 08.11 (Алексей: «нажимаю play — видео не включается»): раньше каждая открытая карточка сразу качала свой ролик,
+// 21 ролик ~250 МБ параллельно, и у видео не было src, пока всё не докачается (на iPhone не докачивалось вовсе).
+// Теперь ролик качается только по нажатию «▶ Смотреть»: прогресс на экране, после загрузки включается сам.
+// В памяти держим только последний открытый ролик (и тот, что играет).
+async function video(el, path, gesture) {
+  const v = el.querySelector("video"), say = (t, bad) => { const m = el.querySelector(".vmsg"); if (m) { m.textContent = t; m.classList.toggle("err", !!bad); } };
+  if (gesture) { try { v.play().catch(() => {}); } catch (e) {} }   // iPhone: «будим» плеер в самом нажатии
+  say("загружаю…");
+  try {
+    const u = await blobUrl(path, "video/mp4", (g, t) => say(`загружаю ${(g / 1e6).toFixed(1)}${t ? " из " + (t / 1e6).toFixed(1) : ""} МБ…`));
+    for (const [p, o] of Object.entries(VID)) if (p !== path && o.paused) { dropUrl(p); o.removeAttribute("src"); o.load(); delete VID[p]; }
+    if (v.getAttribute("src") !== u) v.src = u;
+    VID[path] = v; v.style.display = ""; const b = el.querySelector(".vst"); if (b) b.style.display = "none";
+    if (gesture) { const pr = v.play(); if (pr) pr.catch(() => { if (b) { b.style.display = ""; say("нажми ▶ на самом видео"); } }); }
+  } catch (e) { say(`не загрузилось (${e.message || e}), нажми ещё раз`, true); }
 }
 function render() {
   const items = D.items, tabs = document.getElementById("tabs");
@@ -210,8 +217,8 @@ function render() {
   if (TAB === "long" || TAB === "you-r") longMount();
   document.querySelectorAll("[data-a]").forEach((b) => b.onclick = (e) => { e.preventDefault(); act(b.dataset.a, b.dataset.id); });
   document.querySelectorAll("details[data-v]").forEach((d) => {
-    const v = VID[d.dataset.v]; if (v) { d.querySelector("video").replaceWith(v); d.dataset.done = 1; if (playing.includes(v)) v.play().catch(() => {}); }
-    d.addEventListener("toggle", () => d.open && video(d, d.dataset.v));
+    const v = VID[d.dataset.v]; if (v) { d.querySelector("video").replaceWith(v); v.style.display = ""; const s = d.querySelector(".vst"); if (s) s.style.display = "none"; if (playing.includes(v)) v.play().catch(() => {}); }
+    const b = d.querySelector(".vbtn"); if (b) b.onclick = (e) => { e.preventDefault(); video(d, d.dataset.v, true); };
   });
   const last = D.at || items.map((i) => i.updated).filter(Boolean)[0]; document.getElementById("upd").textContent = last ? "данные от " + last : "";
 }
@@ -256,7 +263,7 @@ function card(i) {
   const flag = i.lang === "en" ? "🇺🇸" : "🇷🇺", kind = i.kind === "reel" ? "🎬 Ролик" : "📝 Сценарий";
   const sc = Object.entries(i.scores || {}).map(([k, v]) => `<span class="chip ${v >= 8 ? "hi" : v < 7 ? "lo" : ""}">${esc(k)} ${esc(v)}</span>`).join("");
   const meta = [i.rubric, i.style, i.seconds ? `~${i.seconds} с` : "", i.stage].filter(Boolean).map((x) => `<span class="chip">${esc(x)}</span>`).join("");
-  const vid = i.video ? `<details data-v="${esc(i.video)}" open><summary>Видео</summary><video controls playsinline preload="none"></video></details>` : "";
+  const vid = i.video ? `<details data-v="${esc(i.video)}" open><summary>Видео</summary><div class="vst btns"><a class="ok vbtn" href="#">▶ Смотреть</a><div class="vmsg lvst"></div></div><video controls playsinline preload="none" style="display:none"></video></details>` : "";
   const btns = i.status === "you" ? `<div class="btns"><a class="ok" data-a="ap" data-id="${esc(i.id)}" href="#">✅ Беру</a><a data-a="ed" data-id="${esc(i.id)}" href="#">✏️ Правки</a><a data-a="vo" data-id="${esc(i.id)}" href="#">🎙 Голосом</a><a data-a="rw" data-id="${esc(i.id)}" href="#">❌ Переделать</a><a data-a="tr" data-id="${esc(i.id)}" href="#">🗑 Мусор</a></div>` : "";
   return `<div class="card"><div class="top"><span>${kind} ${flag} ${esc(i.id)}</span><span>${esc(i.updated || "")}</span></div>
     <div class="title">${esc(i.title)}</div><div class="chips">${meta}</div><div class="chips">${sc}</div>${vid}
