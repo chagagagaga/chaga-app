@@ -295,7 +295,7 @@ function render() {
 // кнопки только записывают решение (бот → ~/ChagaCartoons/style_tests_decisions.json).
 function stView() {
   const L = D.style_tests || [], w = L.filter((x) => !x.decision).length;
-  let h = `<div class="note" style="margin-bottom:10px">🎨 ${L.length} проб стиля: первые ~10 с «Шинели» в манере твоих референсов, голос тот же. Это не ролики для выкладки: выбери, какие делать стилем.${w ? " Ждут решения: " + w + "." : " Все решены."}</div>`;
+  let h = `<div class="note" style="margin-bottom:10px">🎨 Тест стилей v2: всё нарисовано заново — новые персонажи, фоны меняются по сценарию. ${L.length} проб, первые ~10 с «Шинели» по твоим референсам, голос тот же; старые v1 в архиве. Это не ролики для выкладки: выбери, какие делать стилем.${w ? " Ждут решения: " + w + "." : " Все решены."}</div>`;
   for (const x of L) {
     const B = (a, t, c) => `<a${c ? ' class="ok"' : ""} data-a="${a}" data-id="${esc(x.id)}" href="#">${t}</a>`;
     const pins = [x.pin, x.pin2].filter(Boolean).map((u) => `<a href="${safeUrl(u)}" target="_blank" rel="noopener">${esc(u.replace("https://", ""))}</a>`).join(" · ");
