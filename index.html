@@ -70,6 +70,18 @@
   #dlg textarea { width:100%; min-height:140px; font:16px/1.4 inherit; border:1px solid var(--line); border-radius:10px; padding:10px; background:var(--bg); color:var(--ink); margin:8px 0; }
   #dlg .row { display:grid; grid-template-columns:1fr 1fr; gap:8px; } #dlg button { padding:12px; border-radius:10px; border:1px solid var(--line); background:var(--bg); color:var(--ink); font-size:16px; }
   #dlg button.ok { background:var(--ok); color:#fff; border-color:var(--ok); }
+  /* 12.11 siteana1211: вкладка «📈 Аналитика» */
+  .kpi { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:8px; margin-bottom:12px; }
+  .kpi div { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:10px 12px; }
+  .kpi b { display:block; font:600 24px/1.1 Georgia, serif; } .kpi small { color:var(--mute); font-size:12px; }
+  .fun { display:grid; grid-template-columns:minmax(110px,40%) 1fr; gap:6px 10px; align-items:center; font-size:14px; }
+  .fun i { display:block; height:18px; border-radius:4px; background:var(--acc); min-width:2px; }
+  .fun span.v { font-size:13px; color:var(--mute); white-space:nowrap; } .fun .bw { display:flex; align-items:center; gap:8px; min-width:0; }
+  .kv { display:flex; flex-wrap:wrap; gap:6px; margin:4px 0 2px; } .kv .chip b { font-weight:600; margin-left:4px; }
+  .anap { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px; } .anap button { border:1px solid var(--line); background:var(--card); color:var(--ink); border-radius:16px; padding:6px 12px; font-size:14px; }
+  .anap button.on { background:var(--acc); color:#000; border-color:var(--acc); }
+  .anac { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:-4px 0 12px; font-size:14px; }
+  .anac input { font:15px inherit; padding:6px 8px; border:1px solid var(--line); border-radius:8px; background:var(--card); color:var(--ink); }
 .thg{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:6px 0}.thg figure.best{grid-column:1/-1}.thg figure{margin:0;border-radius:10px;overflow:hidden;border:2px solid transparent}.thg figure.best{border-color:#f2c21a}.thg img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;background:#222}.thg figcaption{font-size:12px;padding:4px 6px;opacity:.85}
 </style>
 </head>
@@ -251,13 +263,15 @@ function render() {
   // 31.10: «🎞 Длинные» третьей кнопкой = доска сети (без счётчика: всё, что ждёт тебя, уже в «🎬 Ролики ждут тебя»)
   const lb = `<button class="${TAB === "long" ? "on" : ""}" data-t="long">🎞 Длинные</button>`;
   tabs.innerHTML = tabList.slice(0, 2).map(btn).join("") + lb + tabList.slice(2).map(btn).join("")
-    + `<button class="${TAB === "cal" ? "on" : ""}" data-t="cal">📅 Выкладка${up ? " " + up : ""}</button>`;
+    + `<button class="${TAB === "cal" ? "on" : ""}" data-t="cal">📅 Выкладка${up ? " " + up : ""}</button>`
+    + `<button class="${TAB === "ana" ? "on" : ""}" data-t="ana">📈 Аналитика</button>`;   // 12.11 siteana1211
   const on = tabs.querySelector("button.on"); if (on && (on.offsetLeft + on.offsetWidth > tabs.scrollLeft + tabs.clientWidth || on.offsetLeft < tabs.scrollLeft)) tabs.scrollLeft = Math.max(0, on.offsetLeft - 16);   // 01.11: активная вкладка видна целиком
   tabs.querySelectorAll("button").forEach((b) => b.onclick = () => { TAB = b.dataset.t; try { localStorage.setItem("chaga_tab", TAB); } catch (e) {} render(); });
   const list = items.filter((i) => inTab(i, TAB));
   const playing = Object.values(VID).filter((v) => !v.paused && !v.ended);
   Object.values(LP).forEach((o) => { o.was = !o.v.paused && !o.v.ended; });   // длинные: снятый с экрана плеер браузер ставит на паузу
-  document.getElementById("list").innerHTML = TAB === "cal" ? calendar() : TAB === "long" ? longView() : tabView(TAB, list);
+  document.getElementById("list").innerHTML = TAB === "cal" ? calendar() : TAB === "long" ? longView() : TAB === "ana" ? anaView() : tabView(TAB, list);
+  if (TAB === "ana") anaMount();
   if (TAB === "long" || TAB === "you-r") longMount();
   document.querySelectorAll("[data-a]").forEach((b) => b.onclick = (e) => { e.preventDefault(); act(b.dataset.a, b.dataset.id); });
   document.querySelectorAll("details[data-v]").forEach((d) => {
@@ -291,6 +305,70 @@ function tabView(t, list) {
   const hid = Object.entries(D.hidden || {});
   if (hid.length && ["review", "work", "edits"].includes(t)) h += `<div class="note" style="text-align:center;margin-top:12px">Скрыто из приложения: ${esc(hid.map(([k, n]) => `${n} (${k})`).join(", "))}. В базе карточки целы.</div>`;
   return h;
+}
+// 12.11 siteana1211: «📈 Аналитика» — снимок site_analytics.py (бот, раз в 30 мин): свой счётчик сайта chaga-stats + продажи + соцсети.
+// Готовые периоды целиком; «Свой период» = суммы по дням (визиты, «Купить», продажи, просмотры роликов).
+const ANA_P = { today: "Сегодня", yesterday: "Вчера", "7d": "7 дней", "30d": "30 дней", month: "Месяц", custom: "📅 Свой" };
+let ANA = (() => { try { return localStorage.getItem("chaga_ana") || "7d"; } catch (e) { return "7d"; } })();
+const nf = (x) => x == null ? "—" : typeof x === "string" ? x : Number(x).toLocaleString("ru-RU", { maximumFractionDigits: 2 });
+const pairs = (rows, fmt) => (rows || []).length ? `<div class="kv">${rows.map(([k, v]) => `<span class="chip">${esc(fmt ? fmt(k) : k)}<b>${nf(v)}</b></span>`).join("")}</div>` : `<div class="note">—</div>`;
+const flag = (c) => /^[A-Z]{2}$/.test(c || "") ? String.fromCodePoint(...[...c].map((x) => 0x1F1E6 + x.charCodeAt(0) - 65)) + " " + c : (c || "?");
+const money = (rev) => (rev || []).length ? rev.map(([k, v]) => nf(v) + " " + k).join(" · ") : "0";
+function funBars(fl) {
+  const max = Math.max(1, ...fl.map((s) => s.n || 0));
+  return `<div class="fun">${fl.map((s) => `<div>${esc(s.name)}</div><div class="bw"><i style="width:${Math.max(1, Math.round(100 * (s.n || 0) / max))}%"></i><span class="v">${nf(s.n)}${s.pct != null ? " · " + nf(s.pct) + "%" : ""}</span></div>`).join("")}</div>`;
+}
+function anaCustom(days) {
+  const f = document.getElementById("anaF"), t = document.getElementById("anaT");
+  const a = f ? f.value : "", b = t ? t.value : "";
+  const rows = days.filter((d) => (!a || d.d >= a) && (!b || d.d <= b));
+  const sum = (k) => rows.reduce((x, d) => x + (d[k] || 0), 0), rev = {};
+  rows.forEach((d) => (d.revenue || []).forEach(([c, v]) => rev[c] = (rev[c] || 0) + v));
+  const fl = [["Визиты", sum("visits")], ["Открыли видео", sum("video")], ["Нажали «Купить»", sum("buy")], ["Выбрали регион оплаты", sum("region")], ["Перешли к оплате", sum("paygo")], ["Оплатили", sum("orders")]]
+    .map(([name, n], i, A) => ({ name, n, pct: i && A[i - 1][1] ? Math.round(1000 * n / A[i - 1][1]) / 10 : null }));
+  return `<div class="kpi"><div><b>${nf(sum("visits"))}</b><small>визиты (RU ${nf(sum("vis_ru"))} / EN ${nf(sum("vis_en"))})</small></div><div><b>${nf(sum("pv"))}</b><small>просмотры страниц</small></div>
+    <div><b>${nf(sum("buy"))}</b><small>нажали «Купить»</small></div><div><b>${nf(sum("orders"))}</b><small>продажи · ${esc(money(Object.entries(rev)))}</small></div><div><b>${nf(sum("social"))}</b><small>просмотры роликов</small></div></div>
+    <div class="card"><div class="sub">🔻 Воронка</div>${funBars(fl)}</div><div class="note">Свой период: ${rows.length} дн. (${esc(rows.length ? rows[0].d + " – " + rows[rows.length - 1].d : "нет дней")}). Подробные источники и страны — у готовых периодов или в боте: /site ${esc(a ? a.slice(8, 10) + "." + a.slice(5, 7) : "01.11")}-${esc(b ? b.slice(8, 10) + "." + b.slice(5, 7) : "12.11")}</div>`;
+}
+function anaView() {
+  const A = D.site;
+  if (!A || !A.periods) return `<div class="empty">Аналитика ещё не собрана: бот делает снимок раз в 30 минут (или в боте: /site).</div>`;
+  let h = `<div class="anap">${Object.entries(ANA_P).map(([k, v]) => `<button class="${k === ANA ? "on" : ""}" data-ana="${k}">${v}</button>`).join("")}</div>`;
+  const days = A.days || [];
+  if (ANA === "custom") {
+    const d0 = days.length ? days[0].d : "", d1 = days.length ? days[days.length - 1].d : "";
+    let f = d0, t = d1; try { const s = JSON.parse(localStorage.getItem("chaga_ana_c") || "{}"); f = s.f || d1.slice(0, 8) + "01"; t = s.t || d1; } catch (e) {}
+    h += `<div class="anac">с <input type="date" id="anaF" min="${esc(d0)}" max="${esc(d1)}" value="${esc(f)}"> по <input type="date" id="anaT" min="${esc(d0)}" max="${esc(d1)}" value="${esc(t)}"></div><div id="anaC"></div>`;
+    return h + `<div class="note" style="text-align:center">снимок от ${esc(A.at)}</div>`;
+  }
+  const R = A.periods[ANA]; if (!R) return h + `<div class="empty">Нет данных за период</div>`;
+  const S = R.site || {}, P = R.sales || {}, C = R.social || {};
+  h += `<div class="note" style="margin:-6px 0 10px">${esc(R.label)}: ${esc(R.from)} – ${esc(R.to)} · снимок от ${esc(A.at)}</div>`;
+  if (S.error) h += `<div class="sys warn"><b>🟡 Счётчик сайта</b><div>${S.error === "nokey" ? "Нет ключа счётчика: zsh ~/Projects/chaga-cartoons/stats/deploy.sh" : esc(S.error)}</div></div>`;
+  const ev = S.events || {};
+  h += `<div class="kpi"><div><b>${nf(S.visits)}</b><small>визиты (RU ${nf((S.vis || {}).ru)} / EN ${nf((S.vis || {}).en)})</small></div><div><b>${nf(S.pageviews)}</b><small>просмотры страниц</small></div>
+    <div><b>${nf(ev["buy-click"] || 0)}</b><small>нажали «Купить»</small></div><div><b>${nf(P.count)}</b><small>продажи · ${esc(money(P.revenue))}${P.tests ? " · тест " + P.tests : ""}</small></div>
+    <div><b>${nf(C.total)}</b><small>просмотры роликов</small></div><div><b>${R.conv != null ? nf(R.conv) + "%" : "—"}</b><small>визит → оплата</small></div></div>`;
+  h += `<div class="card"><div class="sub">🔻 Воронка</div>${funBars(R.funnel || [])}</div>`;
+  if (!S.error) {
+    const dv = S.devices || [], dt = dv.reduce((x, [, v]) => x + v, 0) || 1;
+    h += `<div class="card"><div class="sub">🧭 Откуда пришли</div>${pairs(S.origins)}<div class="sub">🏷 Метки (источник/канал)</div>${pairs(S.mediums)}
+      ${(S.campaigns || []).length ? `<div class="sub">🎬 Кампании (ролик)</div>${pairs(S.campaigns)}` : ""}<div class="sub">✂️ Короткие ссылки</div>${pairs(S.short)}
+      <div class="sub">🔗 Сайты-источники</div>${pairs(S.referrers)}</div>
+      <div class="card"><div class="sub">🌍 Страны</div>${pairs(S.countries, flag)}<div class="sub">📱 Устройства</div>${pairs(dv.map(([k, v]) => [({ mobile: "📱 телефон", desktop: "💻 компьютер", tablet: "📟 планшет" })[k] || k || "?", Math.round(100 * v / dt) + "%"]))}</div>
+      <div class="card"><div class="sub">🛒 «Купить» по тарифам</div>${pairs(S.plans)}<div class="sub">💳 Регион оплаты</div>${pairs(S.regions)}<div class="sub">➡️ Перешли к оплате (регион·тариф)</div>${pairs(S.pay_go)}
+      ${(S.currency || []).length ? `<div class="sub">💱 Выбор валюты</div>${pairs(S.currency)}` : ""}${(S.progs || []).length ? `<div class="sub">📖 Открывали программу</div>${pairs(S.progs)}` : ""}</div>`;
+  }
+  if (!P.error) h += `<div class="card"><div class="sub">💰 Продажи: ${nf(P.count)} · ${esc(money(P.revenue))}</div>${P.count ? `<div class="sub">Тарифы</div>${pairs(P.plans)}<div class="sub">Источник (utm)</div>${pairs(P.utm)}<div class="sub">Страны</div>${pairs(P.countries, flag)}` : `<div class="note">Оплат за период нет${P.tests ? " (тестовых: " + P.tests + ")" : ""}.</div>`}</div>`;
+  if (!C.error) h += `<div class="card"><div class="sub">🎬 Просмотры роликов за период: ${nf(C.total)}</div>${pairs(C.by)}<div class="note">по снимкам Postproxy${C.last ? " до " + esc(C.last) : ""}${C.approx ? " · часть роликов без снимка на начало периода (≈)" : ""}</div></div>`;
+  if (A.umami && safeUrl(A.umami)) h += `<div class="note" style="text-align:center"><a href="${safeUrl(A.umami)}" target="_blank" rel="noopener">🔎 Подробно в Umami</a></div>`;
+  return h;
+}
+function anaMount() {
+  document.querySelectorAll("[data-ana]").forEach((b) => b.onclick = () => { ANA = b.dataset.ana; try { localStorage.setItem("chaga_ana", ANA); } catch (e) {} render(); });
+  const c = document.getElementById("anaC"); if (!c) return;
+  const go = () => { c.innerHTML = anaCustom((D.site && D.site.days) || []); try { localStorage.setItem("chaga_ana_c", JSON.stringify({ f: document.getElementById("anaF").value, t: document.getElementById("anaT").value })); } catch (e) {} };
+  document.getElementById("anaF").onchange = go; document.getElementById("anaT").onchange = go; go();
 }
 // календарь выкладки: по дням (Алматы), что и куда выходит, что уже вышло
 const PL = { instagram: "📸 Instagram", tiktok: "🎵 TikTok", youtube: "▶️ YouTube" }, ST = { scheduled: "⏳ запланирован", processing: "⏳ публикуется", published: "✅ вышел", failed: "⚠️ ошибка", deleted: "🗑 снят", unknown: "❔ проверяю", skipped: "⏭ пропущен" };
@@ -452,7 +530,7 @@ async function fetchBuf(path, onp) {
   }
   throw last || new Error("нет источника");
 }
-const APPV = "12.11p0";   // версия страницы в шапке: видно, что телефон открыл новую
+const APPV = "12.11ana";   // версия страницы в шапке: видно, что телефон открыл новую
 function bar(el, g, t) { const b = el && el.querySelector(".bar i"); if (b) { b.parentNode.style.display = ""; b.style.width = (t ? Math.min(100, g / t * 100) : 5) + "%"; } }
 async function blobUrl(path, type, onp) {
   if (!PURL[path]) PURL[path] = fetchBuf(path, (g, t) => { const f = PROG[path]; if (f) f(g, t); }).then(open).then((p) => URL.createObjectURL(new Blob([p], { type })));
