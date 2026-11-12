@@ -186,7 +186,9 @@ async function seal(obj) {
   return btoa(String.fromCharCode(...all));
 }
 function toast(t) { let el = document.getElementById("toast"); if (!el) { el = document.createElement("div"); el.id = "toast"; document.body.appendChild(el); } el.textContent = t; el.className = "show"; clearTimeout(el._t); el._t = setTimeout(() => el.className = "", 2600); }
-const LABEL = { ap: "✅ Беру", ed: "✏️ Правки", rw: "❌ Переделать", tr: "🗑 В мусор", vo: "🎙 Голосом", la: "✅ Одобрено", le: "✏️ Замечание", un: "↩️ Отменить" }, NEXT = { ap: "approved", ed: "edits", rw: "edits", tr: "rejected", la: "L:approved", le: "L:edits", un: "you" };
+const LABEL = { ap: "✅ Беру", ed: "✏️ Правки", rw: "❌ Переделать", tr: "🗑 В мусор", vo: "🎙 Голосом", la: "✅ Одобрено", le: "✏️ Замечание", un: "↩️ Отменить", lq: "📤 Выложить", lm: "➕ Ещё круг", ls: "📦 Отдать как есть", lh: "⏸ Отложить" }, NEXT = { ap: "approved", ed: "edits", rw: "edits", tr: "rejected", la: "L:approved", le: "L:edits", un: "you", lh: "L:shelved" };
+// late1211: решения по длинным, которые нельзя нажать случайно
+const CONFIRM = { lq: "Поставить этот длинный на YouTube в ближайший слот канала (не раньше чем через сутки)?", ls: "Отдать ролик как есть (с замечаниями ревьюеров) тебе на ✅/✏️?", lh: "Отложить ролик? Канал будет ждать." };
 // локальный статус после кнопки (до подтверждения ботом): короткие в D.items, длинные (id L-...) в D.long
 function setLocal(id, st, text) {
   if (String(id).startsWith("L-")) { const v = longAll().find((x) => x.id === id); if (v && st) { v.status = st.replace(/^L:/, ""); v.label = (D.long.statuses || {})[v.status] || v.status; if (text) (v.notes = v.notes || []).push("сейчас " + text); } return; }
@@ -206,6 +208,7 @@ async function flush() {
 }
 setInterval(flush, 120e3); setTimeout(flush, 3e3);
 async function act(a, id) {
+  if (CONFIRM[a] && !window.confirm(CONFIRM[a])) return;
   let text = "";
   if (a === "ed" || a === "rw" || a === "le") { text = await ask(a === "ed" ? "Правки к карточке " + id : a === "le" ? "Замечание к длинному ролику " + id : "Что не так? (можно пусто) " + id, a !== "rw"); if (text === null) return; }
   try {
@@ -474,7 +477,13 @@ function lvid(v, top) {
       <video controls playsinline preload="none" style="display:none"></video><div class="bar" style="display:none"><i></i></div><div class="lvst">720p · ${esc(v.video.mb || "")} МБ всего · ${P.length > 1 ? P.length + " частей, следующая включается сама" : "одна часть"}</div></div>`;
   } else if (v.vnote) vid = `<div class="note">${esc(v.vnote)}</div>`;
   const can = play && ["ready", "edits", "approved"].includes(v.status);
-  const btns = can ? `<div class="btns two">${v.status !== "approved" ? `<a class="ok" data-a="la" data-id="${esc(v.id)}" href="#">✅ Одобрить</a>` : `<a>✅ Одобрен</a>`}<a data-a="le" data-id="${esc(v.id)}" href="#">✏️ Замечание</a></div>` : "";
+  const cm = String(v.id).startsWith("L-cm-"), A = (a, t, ok) => `<a${ok ? ' class="ok"' : ""} data-a="${a}" data-id="${esc(v.id)}" href="#">${t}</a>`;
+  let btns = can ? `<div class="btns two">${v.status !== "approved" ? A("la", "✅ Одобрить", 1) : `<a>✅ Одобрен</a>`}${A("le", "✏️ Замечание")}</div>` : "";
+  // late1211: 📤 у одобренного (слово владельца по одному ролику), ⏸ у ждущего, ➕/📦/⏸ у застрявшего в стоп-листе
+  if (!cm && v.status === "approved" && v.decision_pending !== "publish") btns += `<div class="btns">${A("lq", "📤 Выложить", 1)}</div>`;
+  if (!cm && v.status === "ready") btns += `<div class="btns">${A("lh", "⏸ Отложить")}</div>`;
+  if (!cm && v.stuck) btns += `<div class="note">🛑 Круги не сходятся: реши, что дальше.</div><div class="btns two">${A("lm", "➕ Ещё круг", 1)}${A("ls", "📦 Отдать как есть")}</div><div class="btns two">${A("lh", "⏸ Отложить")}${A("le", "✏️ Замечание")}</div>`;
+  if (v.stop_loss) btns = `<div class="note">Готов с замечаниями ревьюеров (стоп-лосс): ${esc(v.stop_loss)}</div>` + btns;
   const notes = (v.notes || []).length ? `<details${v.status === "edits" ? " open" : ""}><summary>Твои замечания</summary><div class="text">${esc(v.notes.join("\n"))}</div></details>` : "";
   const err = v.error ? `<div class="note" style="color:var(--bad)">${esc(v.error)}</div>` : "";
   // 31.10: 3 обложки (longform-studio/tools/thumbnail.py), лучшая первой и отмечена ⭐, оценка оценщика 1-10
