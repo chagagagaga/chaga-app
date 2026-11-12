@@ -63,6 +63,8 @@
   .rnd { border-top:1px dashed var(--line); padding-top:6px; margin-top:6px; font-size:14px; }
 .sys { border-radius:12px; padding:10px 12px; margin-bottom:12px; font-size:14px; border:1px solid var(--line); background:var(--card); }
   .sys.bad { border-color:var(--bad); } .sys.warn { border-color:var(--acc); } .sys div { margin:2px 0; } .sys b { display:block; margin-bottom:4px; }
+  .stref { display:flex; gap:6px; margin-top:8px; } .stref img { flex:1 1 0; min-width:0; max-height:220px; object-fit:contain; background:var(--chip); border-radius:8px; }
+  .stdec { border-left:4px solid var(--ok); padding:6px 10px; margin:8px 0; font-size:14px; background:var(--chip); border-radius:8px; }
   .held { border-left:4px solid var(--acc); padding:6px 10px; margin:8px 0; font-size:14px; background:var(--chip); border-radius:8px; }
   #dlg { position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:20; display:none; align-items:flex-end; justify-content:center; }
   #dlg.on { display:flex; }
@@ -186,11 +188,12 @@ async function seal(obj) {
   return btoa(String.fromCharCode(...all));
 }
 function toast(t) { let el = document.getElementById("toast"); if (!el) { el = document.createElement("div"); el.id = "toast"; document.body.appendChild(el); } el.textContent = t; el.className = "show"; clearTimeout(el._t); el._t = setTimeout(() => el.className = "", 2600); }
-const LABEL = { ap: "✅ Беру", ed: "✏️ Правки", rw: "❌ Переделать", tr: "🗑 В мусор", vo: "🎙 Голосом", la: "✅ Одобрено", le: "✏️ Замечание", un: "↩️ Отменить", lq: "📤 Выложить", lm: "➕ Ещё круг", ls: "📦 Отдать как есть", lh: "⏸ Отложить" }, NEXT = { ap: "approved", ed: "edits", rw: "edits", tr: "rejected", la: "L:approved", le: "L:edits", un: "you", lh: "L:shelved" };
+const LABEL = { sok: "✅ Нравится — сделать стилем", sed: "✏️ Правки", str: "🗑 Не надо", ap: "✅ Беру", ed: "✏️ Правки", rw: "❌ Переделать", tr: "🗑 В мусор", vo: "🎙 Голосом", la: "✅ Одобрено", le: "✏️ Замечание", un: "↩️ Отменить", lq: "📤 Выложить", lm: "➕ Ещё круг", ls: "📦 Отдать как есть", lh: "⏸ Отложить" }, NEXT = { sok: "ST:like", sed: "ST:edits", str: "ST:trash", ap: "approved", ed: "edits", rw: "edits", tr: "rejected", la: "L:approved", le: "L:edits", un: "you", lh: "L:shelved" };
 // late1211: решения по длинным, которые нельзя нажать случайно
 const CONFIRM = { lq: "Поставить этот длинный на YouTube в ближайший слот канала (не раньше чем через сутки)?", ls: "Отдать ролик как есть (с замечаниями ревьюеров) тебе на ✅/✏️?", lh: "Отложить ролик? Канал будет ждать." };
 // локальный статус после кнопки (до подтверждения ботом): короткие в D.items, длинные (id L-...) в D.long
 function setLocal(id, st, text) {
+  if (String(id).startsWith("ST-")) { const x = (D.style_tests || []).find((y) => y.id === id), a = Object.keys(NEXT).find((k) => NEXT[k] === st); if (x && st) { x.decision = st.replace(/^ST:/, ""); x.label = LABEL[a] || x.decision; if (text) x.text = ((x.text || "") + "\n" + text).trim(); } return; }
   if (String(id).startsWith("L-")) { const v = longAll().find((x) => x.id === id); if (v && st) { v.status = st.replace(/^L:/, ""); v.label = (D.long.statuses || {})[v.status] || v.status; if (text) (v.notes = v.notes || []).push("сейчас " + text); } return; }
   const it = D.items.find((x) => x.id === id); if (it) { if (!(it.held && st !== "you" && it.status === "published")) it.status = st; it.wait = st === "you"; it.undo_until = st === "you" ? 0 : Date.now() / 1000 + 600; if (text) it.notes = ((it.notes || "") + "\n" + text).trim(); }
 }
@@ -210,7 +213,7 @@ setInterval(flush, 120e3); setTimeout(flush, 3e3);
 async function act(a, id) {
   if (CONFIRM[a] && !window.confirm(CONFIRM[a])) return;
   let text = "";
-  if (a === "ed" || a === "rw" || a === "le") { text = await ask(a === "ed" ? "Правки к карточке " + id : a === "le" ? "Замечание к длинному ролику " + id : "Что не так? (можно пусто) " + id, a !== "rw"); if (text === null) return; }
+  if (a === "ed" || a === "rw" || a === "le" || a === "sed") { text = await ask(a === "sed" ? "Правки к пробе стиля " + id : a === "ed" ? "Правки к карточке " + id : a === "le" ? "Замечание к длинному ролику " + id : "Что не так? (можно пусто) " + id, a !== "rw"); if (text === null) return; }
   try {
     const n = crypto.getRandomValues(new Uint32Array(2)).join("");
     const body = await seal({ a, id, text: text.trim(), ts: Date.now(), n });
@@ -265,7 +268,9 @@ function render() {
   };
   // 31.10: «🎞 Длинные» третьей кнопкой = доска сети (без счётчика: всё, что ждёт тебя, уже в «🎬 Ролики ждут тебя»)
   const lb = `<button class="${TAB === "long" ? "on" : ""}" data-t="long">🎞 Длинные</button>`;
-  tabs.innerHTML = tabList.slice(0, 2).map(btn).join("") + lb + tabList.slice(2).map(btn).join("")
+  const stw = (D.style_tests || []).filter((x) => !x.decision).length;   // 12.11 styletest1211: «🎨 Тест стилей» ждут решения
+  const sb = (D.style_tests || []).length ? `<button class="${TAB === "st" ? "on" : ""}" data-t="st">🎨 Тест стилей${stw ? " " + stw : ""}</button>` : "";
+  tabs.innerHTML = tabList.slice(0, 2).map(btn).join("") + sb + lb + tabList.slice(2).map(btn).join("")
     + `<button class="${TAB === "cal" ? "on" : ""}" data-t="cal">📅 Выкладка${up ? " " + up : ""}</button>`
     + `<button class="${TAB === "ana" ? "on" : ""}" data-t="ana">📈 Аналитика</button>`;   // 12.11 siteana1211
   const on = tabs.querySelector("button.on"); if (on && (on.offsetLeft + on.offsetWidth > tabs.scrollLeft + tabs.clientWidth || on.offsetLeft < tabs.scrollLeft)) tabs.scrollLeft = Math.max(0, on.offsetLeft - 16);   // 01.11: активная вкладка видна целиком
@@ -273,8 +278,9 @@ function render() {
   const list = items.filter((i) => inTab(i, TAB));
   const playing = Object.values(VID).filter((v) => !v.paused && !v.ended);
   Object.values(LP).forEach((o) => { o.was = !o.v.paused && !o.v.ended; });   // длинные: снятый с экрана плеер браузер ставит на паузу
-  document.getElementById("list").innerHTML = TAB === "cal" ? calendar() : TAB === "long" ? longView() : TAB === "ana" ? anaView() : tabView(TAB, list);
+  document.getElementById("list").innerHTML = TAB === "cal" ? calendar() : TAB === "long" ? longView() : TAB === "ana" ? anaView() : TAB === "st" ? stView() : tabView(TAB, list);
   if (TAB === "ana") anaMount();
+  if (TAB === "st") document.querySelectorAll("img[data-img]").forEach((im) => blobUrl(im.dataset.img, "image/jpeg").then((u) => { im.src = u; }).catch(() => { im.alt = "референс не загрузился"; }));
   if (TAB === "long" || TAB === "you-r") longMount();
   document.querySelectorAll("[data-a]").forEach((b) => b.onclick = (e) => { e.preventDefault(); act(b.dataset.a, b.dataset.id); });
   document.querySelectorAll("details[data-v]").forEach((d) => {
@@ -285,6 +291,24 @@ function render() {
 }
 // 01.11: содержимое вкладки коротких. «🎬 Ролики ждут тебя» = длинные ГОТОВ + короткие на решении (только финальное),
 // «⚙️ В работе» = ролики фабрики сейчас; скрытое (пробные, брошенные версии) только счётчиком, в базе оно цело.
+// 12.11 styletest1211: «🎨 Тест стилей» — пробы стиля (первые ~10 с «Шинели» в манере референсов). Не ролики: в выкладку не идут,
+// кнопки только записывают решение (бот → ~/ChagaCartoons/style_tests_decisions.json).
+function stView() {
+  const L = D.style_tests || [], w = L.filter((x) => !x.decision).length;
+  let h = `<div class="note" style="margin-bottom:10px">🎨 ${L.length} проб стиля: первые ~10 с «Шинели» в манере твоих референсов, голос тот же. Это не ролики для выкладки: выбери, какие делать стилем.${w ? " Ждут решения: " + w + "." : " Все решены."}</div>`;
+  for (const x of L) {
+    const B = (a, t, c) => `<a${c ? ' class="ok"' : ""} data-a="${a}" data-id="${esc(x.id)}" href="#">${t}</a>`;
+    const pins = [x.pin, x.pin2].filter(Boolean).map((u) => `<a href="${safeUrl(u)}" target="_blank" rel="noopener">${esc(u.replace("https://", ""))}</a>`).join(" · ");
+    h += `<div class="card"><div class="top"><span>🎨 Тест стилей · #${esc(x.n)}</span><span>${x.decision ? "решено" : "ждёт тебя"}</span></div>
+      <div class="title">${esc(x.title)}</div>${x.decision ? `<div class="stdec">${esc(x.label || x.decision)}${x.at ? " · " + esc(x.at) : ""}</div>` : ""}
+      <div class="text" style="margin-top:4px">${esc(x.desc)}</div>
+      ${x.video ? `<details data-v="${esc(x.video)}" open><summary>Видео</summary><div class="vst btns"><a class="ok vbtn" href="#">▶ Смотреть</a></div><div class="bar" style="display:none"><i></i></div><div class="vmsg lvst"></div><video controls playsinline preload="none" style="display:none"></video></details>` : ""}
+      <details open><summary>Референс</summary><div class="stref">${(x.refs || []).map((r) => `<img data-img="${esc(r)}" alt="референс">`).join("")}</div><div class="note">${pins}</div></details>
+      ${x.text ? `<details open><summary>Твои правки</summary><div class="text">${esc(x.text)}</div></details>` : ""}
+      <div class="btns">${B("sok", "✅ Нравится — сделать стилем", 1).replace("<a ", '<a style="grid-column:1/-1" ')}${B("sed", "✏️ Правки")}${B("str", "🗑 Не надо")}</div></div>`;
+  }
+  return h;
+}
 function sysBanner() {
   const S = D.system; if (!S || !(S.lines || []).length) return "";
   return `<div class="sys ${esc(S.level)}"><b>${S.level === "bad" ? "🔴" : "🟡"} Что стоит и почему</b>${S.lines.map((x) => `<div>${esc(x.text)}</div>`).join("")}</div>`;
@@ -539,7 +563,7 @@ async function fetchBuf(path, onp) {
   }
   throw last || new Error("нет источника");
 }
-const APPV = "12.11ana";   // версия страницы в шапке: видно, что телефон открыл новую
+const APPV = "12.11st";   // версия страницы в шапке: видно, что телефон открыл новую
 function bar(el, g, t) { const b = el && el.querySelector(".bar i"); if (b) { b.parentNode.style.display = ""; b.style.width = (t ? Math.min(100, g / t * 100) : 5) + "%"; } }
 async function blobUrl(path, type, onp) {
   if (!PURL[path]) PURL[path] = fetchBuf(path, (g, t) => { const f = PROG[path]; if (f) f(g, t); }).then(open).then((p) => URL.createObjectURL(new Blob([p], { type })));
