@@ -72,6 +72,12 @@
   #dlg textarea { width:100%; min-height:140px; font:16px/1.4 inherit; border:1px solid var(--line); border-radius:10px; padding:10px; background:var(--bg); color:var(--ink); margin:8px 0; }
   #dlg .row { display:grid; grid-template-columns:1fr 1fr; gap:8px; } #dlg button { padding:12px; border-radius:10px; border:1px solid var(--line); background:var(--bg); color:var(--ink); font-size:16px; }
   #dlg button.ok { background:var(--ok); color:#fff; border-color:var(--ok); }
+  /* 17.11 ideas1711: «💡 Мои идеи» */
+  #ideaText { width:100%; box-sizing:border-box; min-height:150px; font:16px/1.45 inherit; border:1px solid var(--line); border-radius:10px; padding:10px; background:var(--bg); color:var(--ink); margin:10px 0 6px; resize:vertical; }
+  .ilangs { display:flex; gap:16px; font-size:15px; margin:4px 2px; } .ilangs label { display:flex; align-items:center; gap:6px; }
+  .ilangs input { width:20px; height:20px; accent-color:var(--ok); }
+  .btns a.busy { opacity:.5; pointer-events:none; }
+  .istat { font-size:15px; margin:6px 0 2px; }
   /* 12.11 siteana1211: вкладка «📈 Аналитика» */
   .kpi { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:8px; margin-bottom:12px; }
   .kpi div { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:10px 12px; }
@@ -270,7 +276,10 @@ function render() {
   const lb = `<button class="${TAB === "long" ? "on" : ""}" data-t="long">🎞 Длинные</button>`;
   const stw = (D.style_tests || []).filter((x) => !x.decision).length;   // 12.11 styletest1211: «🎨 Тест стилей» ждут решения
   const sb = (D.style_tests || []).length ? `<button class="${TAB === "st" ? "on" : ""}" data-t="st">🎨 Тест стилей${stw ? " " + stw : ""}</button>` : "";
-  tabs.innerHTML = tabList.slice(0, 2).map(btn).join("") + sb + lb + tabList.slice(2).map(btn).join("")
+  // 17.11 ideas1711: «💡 Мои идеи» первой кнопкой (Алексей: «на первое место»); число = идеи, которые ещё пишутся
+  const iw = (D.ideas || []).filter((x) => x.state === "queued" || x.state === "writing").length + localIdeas().length;
+  const ib = `<button class="${TAB === "idea" ? "on" : ""}" data-t="idea">💡 Мои идеи${iw ? " " + iw : ""}</button>`;
+  tabs.innerHTML = ib + tabList.slice(0, 2).map(btn).join("") + sb + lb + tabList.slice(2).map(btn).join("")
     + `<button class="${TAB === "cal" ? "on" : ""}" data-t="cal">📅 Выкладка${up ? " " + up : ""}</button>`
     + `<button class="${TAB === "ana" ? "on" : ""}" data-t="ana">📈 Аналитика</button>`;   // 12.11 siteana1211
   const on = tabs.querySelector("button.on"); if (on && (on.offsetLeft + on.offsetWidth > tabs.scrollLeft + tabs.clientWidth || on.offsetLeft < tabs.scrollLeft)) tabs.scrollLeft = Math.max(0, on.offsetLeft - 16);   // 01.11: активная вкладка видна целиком
@@ -278,8 +287,11 @@ function render() {
   const list = items.filter((i) => inTab(i, TAB));
   const playing = Object.values(VID).filter((v) => !v.paused && !v.ended);
   Object.values(LP).forEach((o) => { o.was = !o.v.paused && !o.v.ended; });   // длинные: снятый с экрана плеер браузер ставит на паузу
-  document.getElementById("list").innerHTML = TAB === "cal" ? calendar() : TAB === "long" ? longView() : TAB === "ana" ? anaView() : TAB === "st" ? stView() : tabView(TAB, list);
+  const IL = document.getElementById("ideaList");
+  if (TAB === "idea" && IL && document.getElementById("ideaText")) IL.innerHTML = ideaList();   // форма не перерисовывается: текст и клавиатура целы
+  else document.getElementById("list").innerHTML = TAB === "idea" ? ideaView() : TAB === "cal" ? calendar() : TAB === "long" ? longView() : TAB === "ana" ? anaView() : TAB === "st" ? stView() : tabView(TAB, list);
   if (TAB === "ana") anaMount();
+  if (TAB === "idea") ideaMount();
   if (TAB === "st") document.querySelectorAll("img[data-img]").forEach((im) => blobUrl(im.dataset.img, "image/jpeg").then((u) => { im.src = u; }).catch(() => { im.alt = "референс не загрузился"; }));
   if (TAB === "long" || TAB === "you-r") longMount();
   document.querySelectorAll("[data-a]").forEach((b) => b.onclick = (e) => { e.preventDefault(); act(b.dataset.a, b.dataset.id); });
@@ -308,6 +320,64 @@ function stView() {
       <div class="btns">${B("sok", "✅ Нравится — сделать стилем", 1).replace("<a ", '<a style="grid-column:1/-1" ')}${B("sed", "✏️ Правки")}${B("str", "🗑 Не надо")}</div></div>`;
   }
   return h;
+}
+// ===== 17.11 ideas1711: «💡 Мои идеи» — свои идеи Алексея → сценарий (бот: engine/ideas.py + idea.sh) → «Ждут тебя» → обычная воронка
+const IMODE = { rewrite: "🚀 Улучшить и переписать", asis: "✍️ Как есть (микроправки)" };
+let ISENDING = false;
+function localIdeas() {   // отправленные, но ещё не пришедшие в данных бота (живут до первой сводки с ними)
+  let L = []; try { L = JSON.parse(localStorage.getItem("chaga_ideas_local") || "[]"); } catch (e) {}
+  const got = new Set((D && D.ideas || []).map((x) => x.text));
+  const keep = L.filter((x) => !got.has(x.text) && Date.now() - (x.t || 0) < 3 * 86400e3);
+  if (keep.length !== L.length) try { localStorage.setItem("chaga_ideas_local", JSON.stringify(keep)); } catch (e) {}
+  return keep;
+}
+function addLocalIdea(x) { const L = localIdeas(); L.unshift(x); try { localStorage.setItem("chaga_ideas_local", JSON.stringify(L)); } catch (e) {} }
+function ideaView() {
+  return `<div class="card"><div class="title">💡 Новая идея</div>
+    <div class="note">Тема, сюжет, хук или готовый текст. Напишу сценарий, прогоню ревьюеров и пришлю тебе на ✅, дальше как обычно: ролик, твой ✅, выкладка.</div>
+    <textarea id="ideaText" placeholder="Например: «Шинель» глазами самой шинели, финал — она снова висит в лавке"></textarea>
+    <div class="ilangs"><label><input type="checkbox" id="ilRu" checked> 🇷🇺 RU</label><label><input type="checkbox" id="ilEn" checked> 🇺🇸 EN</label></div>
+    <div class="btns"><a href="#" class="ok" data-ia="rewrite">🚀 Улучшить и переписать</a><a href="#" data-ia="asis">✍️ Как есть (микроправки)</a></div>
+    <div class="note">🚀 возьму суть и напишу сильный сценарий по всем правилам. ✍️ оставлю твой текст: поправлю только формат, ударения, факты и запретные слова.</div></div>
+    <div class="sec">Мои идеи</div><div id="ideaList">${ideaList()}</div>`;
+}
+function ideaList() {
+  const L = [...localIdeas(), ...(D.ideas || [])];
+  if (!L.length) return `<div class="empty">Идей пока нет. Напиши первую выше.</div>`;
+  const fl = (l) => (l || []).map((x) => x === "en" ? "🇺🇸" : "🇷🇺").join(" ");
+  return L.map((x) => `<div class="card"><div class="top"><span>💡 ${esc(x.id || "отправлено")} · ${fl(x.langs)}</span><span>${esc(x.at || "")}</span></div>
+    <div class="istat">${esc(x.label || "")}</div><div class="chips"><span class="chip">${esc(x.mode_label || IMODE[x.mode] || "")}</span></div>
+    <details${String(x.text || "").length < 300 ? " open" : ""}><summary>Текст идеи</summary><div class="text">${esc(x.text)}</div></details>
+    ${(x.cards || []).length ? `<div class="note">Карточки: ${x.cards.map((c) => `${c.lang === "en" ? "🇺🇸" : "🇷🇺"} ${esc(c.id)} ${esc(c.title || "")}`).join("<br>")}</div>` : ""}</div>`).join("");
+}
+function ideaMount() {
+  const ta = document.getElementById("ideaText"); if (!ta || ta.dataset.m) return; ta.dataset.m = "1";
+  try { ta.value = localStorage.getItem("chaga_idea_draft") || ""; } catch (e) {}   // черновик не теряется при перезапуске
+  ta.oninput = () => { try { localStorage.setItem("chaga_idea_draft", ta.value); } catch (e) {} };
+  document.querySelectorAll("[data-ia]").forEach((b) => b.onclick = (e) => { e.preventDefault(); sendIdea(b.dataset.ia); });
+}
+async function sendIdea(mode) {
+  if (ISENDING) return;
+  const ta = document.getElementById("ideaText"), text = (ta && ta.value || "").trim();
+  if (!text) { if (ta) ta.focus(); toast("Сначала напиши идею."); return; }
+  const langs = [document.getElementById("ilRu").checked && "ru", document.getElementById("ilEn").checked && "en"].filter(Boolean);
+  if (!langs.length) { toast("Отметь хотя бы один язык."); return; }
+  const bs = document.querySelectorAll("[data-ia]"); ISENDING = true; bs.forEach((b) => b.classList.add("busy"));
+  try {
+    const n = crypto.getRandomValues(new Uint32Array(2)).join("");
+    const body = await seal({ a: "idea", id: "IDEA", text, mode, langs, ts: Date.now(), n });
+    if (body.length > 3800) { toast("Слишком длинно для одной отправки. Сократи или раздели на две идеи."); return; }
+    const at = new Date().toLocaleString("ru-RU", { timeZone: "Asia/Almaty", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).replace(",", "");
+    const loc = { text, mode, langs, at, t: Date.now(), label: "📨 отправлено, жду подтверждения бота" };
+    let r = null; try { r = await fetch("https://ntfy.sh/" + await topic(), { method: "POST", body }); } catch (x) {}
+    if (!r || r.status === 429 || r.status >= 500) { queue(body, "IDEA", null); loc.label = "📨 нет связи с ящиком команд: сохранил, дошлю сам"; }
+    else if (!r.ok) throw new Error("ntfy " + r.status);
+    addLocalIdea(loc); ta.value = ""; try { localStorage.removeItem("chaga_idea_draft"); } catch (e) {}
+    render();
+    toast(`${IMODE[mode]}: отправил боту.`);
+    if (r && r.ok) waitAck(n, 90e3).then((ack) => toast(ack ? ack.msg.slice(0, 180) : "Бот пока не подтвердил: возьмёт, когда дойдёт."));
+  } catch (e) { toast("Не отправилось: " + e.message + ". Текст на месте, попробуй ещё раз."); }
+  finally { ISENDING = false; bs.forEach((b) => b.classList.remove("busy")); }
 }
 function sysBanner() {
   const S = D.system; if (!S || !(S.lines || []).length) return "";
@@ -565,7 +635,7 @@ async function fetchBuf(path, onp) {
   }
   throw last || new Error("нет источника");
 }
-const APPV = "12.11st";   // версия страницы в шапке: видно, что телефон открыл новую
+const APPV = "17.11ideas";   // версия страницы в шапке: видно, что телефон открыл новую
 function bar(el, g, t) { const b = el && el.querySelector(".bar i"); if (b) { b.parentNode.style.display = ""; b.style.width = (t ? Math.min(100, g / t * 100) : 5) + "%"; } }
 async function blobUrl(path, type, onp) {
   if (!PURL[path]) PURL[path] = fetchBuf(path, (g, t) => { const f = PROG[path]; if (f) f(g, t); }).then(open).then((p) => URL.createObjectURL(new Blob([p], { type })));
