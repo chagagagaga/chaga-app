@@ -453,16 +453,16 @@ function longView() {
   const wait = longWait().length;
   const stat = [["🎨 анимация", (v) => v.status === "anim"], ["⏳ в очереди", (v) => v.status === "queue"], ["⚙️ рендер", (v) => ["render", "built"].includes(v.status)],
     ["🔍 ревью", (v) => v.status === "reviewing"], ["🛠 доработка", (v) => ["fixing", "edits"].includes(v.status)], ["✅ одобрено", (v) => v.status === "approved"],
-    ["📤 запланировано", (v) => v.status === "scheduled"]].map(([t, f]) => [t, cnt(f)]).filter(([, n]) => n);
+    ["📤 запланировано", (v) => v.status === "scheduled"], ["✅ вышло", (v) => v.status === "published"]].map(([t, f]) => [t, cnt(f)]).filter(([, n]) => n);
   let h = `<div class="card"><div class="title" style="margin-top:0">Сеть длинных YouTube</div>
     <div class="chips"><span class="chip hi">каналов создано ${made}/${net.length}</span>${stat.map(([t, n]) => `<span class="chip">${esc(t)} ${n}</span>`).join("")}</div>
     <div class="note">${wait ? `👀 Ждут тебя: ${wait}. Они в «🎬 Ролики ждут тебя».` : "Ничего не ждёт тебя. Длинный придёт в «🎬 Ролики ждут тебя», только когда ревьюеры поставят ГОТОВ."}</div></div>`;
   const cm = L.channels.filter((c) => c.chaga);
   if (cm.length) h += `<div class="sec">Chaga Movies long</div>` + cm.map(chCard).join("");
-  h += `<div class="sec">10 каналов · первый ролик</div>` + net.map(chCard).join("");
+  h += `<div class="sec">10 каналов</div>` + net.map(chCard).join("");
   return h;
 }
-const STC = { ready: "hi", approved: "hi", scheduled: "hi", error: "lo", fixing: "lo", edits: "lo" };
+const STC = { ready: "hi", approved: "hi", scheduled: "hi", published: "hi", error: "lo", fixing: "lo", edits: "lo" };
 function chCard(c) {
   const v0 = (c.videos || [])[0];
   const st = (c.videos || []).map((v) => `<span class="chip ${STC[v.status] || ""}">${esc(v.label)}</span>`).join("") || `<span class="chip">роликов пока нет</span>`;
@@ -484,7 +484,7 @@ function chCard(c) {
     <div class="text">${esc(s.text)}</div>${s.ru ? `<div class="sub">Перевод (RU)</div><div class="text">${esc(s.ru)}</div>` : ""}</details>`).join("");
   const top = (c.topics || []).length ? `<details><summary>Очередь тем · ${c.topics.length}</summary><div class="text">${esc(c.topics.map((t, i) => `${i + 1}. ${t.title}`).join("\n"))}</div></details>` : "";
   return `<details class="card ch" data-ch="${esc(c.slug)}"${LOPEN.has(c.slug) ? " open" : ""}><summary>${ava(c)}<div class="chn"><b>${esc(c.name)}</b><small>${esc(sub || c.niche)}</small><div class="chips">${st}</div>${v0 && v0.updated ? `<small>обновлено ${esc(v0.updated)}</small>` : ""}</div></summary>
-    ${ban}${c.tagline ? `<div class="note"><i>${esc(c.tagline)}</i></div>` : ""}<div class="chips">${facts}</div>${link}${clip}${sample}${about}<div class="sub">Первый ролик</div>${vids}${scr}${top}</details>`;
+    ${ban}${c.tagline ? `<div class="note"><i>${esc(c.tagline)}</i></div>` : ""}<div class="chips">${facts}</div>${link}${clip}${sample}${about}<div class="sub">Ролики</div>${vids}${scr}${top}</details>`;
 }
 function lvid(v, top) {
   const c = v._ch, chips = [v.label, v.duration ? mmss(v.duration) : v.voice_s ? `голос ${mmss(v.voice_s)}` : ""].filter(Boolean).map((x) => `<span class="chip">${esc(x)}</span>`).join("");
@@ -493,6 +493,8 @@ function lvid(v, top) {
   const head = top ? `<div class="top"><span style="display:flex;gap:8px;align-items:center">${ava(c, true)}${esc(c.name)}</span><span>${esc(v.updated || "")}</span></div>` : "";
   let vid = "";
   if (!top && v.status === "ready") vid = `<div class="note">👀 Ждёт твоего решения во вкладке «🎬 Ролики ждут тебя».</div>`;
+  // 17.11 app1711: вышедший = ссылка на YouTube (лёгкую версию не держим)
+  else if (v.status === "published") vid = v.yt ? `<div class="btns"><a class="ok" href="${esc(v.yt)}" target="_blank" rel="noopener">▶ Смотреть на YouTube</a></div>` : `<div class="note">Вышел на YouTube (ссылка появится, когда её подтвердит выкладка шортсов).</div>`;
   else if (!play) vid = "";
   else if (v.video && (v.video.parts || []).length) {
     const P = v.video.parts;
