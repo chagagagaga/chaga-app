@@ -494,10 +494,13 @@ function card(i) {
     : i.long_script ? "" : i.held && waits(i) ?`<div class="btns">${B("ap", "✅ Вернуть в план", 1)}${B("tr", "🗑 Не выкладывать")}${B("ed", "✏️ Правки")}${B("vo", "🎙 Голосом")}</div>`
     : waits(i) ? `<div class="btns">${B("ap", "✅ Беру", 1)}${B("ed", "✏️ Правки")}${B("vo", "🎙 Голосом")}${B("rw", "❌ Переделать")}${B("tr", "🗑 Мусор")}</div>`
     : i.undo_until && Date.now() / 1000 < i.undo_until ? `<div class="btns">${B("un", "↩️ Отменить (10 мин)")}</div>` : "";
-  const held = i.held && waits(i) ? `<div class="held">⏸ Снят с выкладки, ждёт решения: ${esc(i.held)}</div>` : "";
+  // 18.11 rvru1811: сценарий длинного — оценка рецензента (20 пунктов, 40 баллов, проход 32) и разбор «почему» по-русски
+  const rv = i.rv ? `<div class="chips"><span class="chip ${i.rv.ok ? "hi" : "lo"}"><b>🔍 Ревьюер ${esc(i.rv.score)}/40</b></span><span class="chip">проход от ${esc(i.rv.pass)}</span>${(i.rv.groups || []).map((g) => `<span class="chip ${g.got === g.max ? "hi" : ""}">${esc(g.name)} ${esc(g.got)}/${esc(g.max)}</span>`).join("")}</div>
+    <details open><summary>Почему ${esc(i.rv.score)} из 40</summary><div class="text">${esc(i.rv.why)}</div></details>` : "";
+  const held = i.held && waits(i) ?`<div class="held">⏸ Снят с выкладки, ждёт решения: ${esc(i.held)}</div>` : "";
   const rwk = i.rework ? `<div class="held">🔁 ${esc(i.rework)}</div>` : "";
   return `<div class="card"><div class="top"><span>${kind} ${flag} ${esc(i.id)}</span><span>${esc(i.updated || "")}</span></div>
-    <div class="title">${esc(i.title)}</div>${held}${rwk}<div class="chips">${meta}</div><div class="chips">${sc}</div>${vid}
+    <div class="title">${esc(i.title)}</div>${held}${rwk}<div class="chips">${meta}</div>${rv}<div class="chips">${sc}</div>${vid}
     ${(i.chapters || []).length ? `<details><summary>Главы (${i.chapters.length})</summary><div class="text">${esc(i.chapters.map((c, k) => (k + 1) + ". " + c).join("\n"))}</div></details>` : ""}
     ${i.text ? `<details${i.kind === "script" && i.status === "you" ? " open" : ""}><summary>${esc(i.text_label || "Текст")}</summary><div class="text">${esc(i.text)}</div></details>` : ""}
     ${i.text_en ? `<details><summary>Оригинал (EN, идёт в озвучку)</summary><div class="text">${esc(i.text_en)}</div></details>` : ""}
