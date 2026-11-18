@@ -194,14 +194,14 @@ async function seal(obj) {
   return btoa(String.fromCharCode(...all));
 }
 function toast(t) { let el = document.getElementById("toast"); if (!el) { el = document.createElement("div"); el.id = "toast"; document.body.appendChild(el); } el.textContent = t; el.className = "show"; clearTimeout(el._t); el._t = setTimeout(() => el.className = "", 2600); }
-const LABEL = { sok: "✅ Нравится — сделать стилем", sed: "✏️ Правки", str: "🗑 Не надо", ap: "✅ Беру", ed: "✏️ Правки", rw: "❌ Переделать", tr: "🗑 В мусор", vo: "🎙 Голосом", la: "✅ Одобрено", le: "✏️ Замечание", un: "↩️ Отменить", lq: "📤 Выложить", lm: "➕ Ещё круг", ls: "📦 Отдать как есть", lh: "⏸ Отложить" }, NEXT = { sok: "ST:like", sed: "ST:edits", str: "ST:trash", ap: "approved", ed: "edits", rw: "edits", tr: "rejected", la: "L:approved", le: "L:edits", un: "you", lh: "L:shelved" };
+const LABEL = { sok: "✅ Нравится — сделать стилем", sed: "✏️ Правки", str: "🗑 Не надо", ap: "✅ Беру", ed: "✏️ Правки", rw: "❌ Переделать", tr: "🗑 В мусор", vo: "🎙 Голосом", la: "✅ Одобрено", le: "✏️ Замечание", un: "↩️ Отменить", lq: "📤 Выложить", lm: "➕ Ещё круг", ls: "📦 Отдать как есть", lh: "⏸ Отложить", ka: "✅ Сценарий ок", ke: "✏️ Правки к сценарию" }, NEXT = { ka: "approved", ke: "edits", sok: "ST:like", sed: "ST:edits", str: "ST:trash", ap: "approved", ed: "edits", rw: "edits", tr: "rejected", la: "L:approved", le: "L:edits", un: "you", lh: "L:shelved" };
 // late1211: решения по длинным, которые нельзя нажать случайно
 const CONFIRM = { lq: "Поставить этот длинный на YouTube в ближайший слот канала (не раньше чем через сутки)?", ls: "Отдать ролик как есть (с замечаниями ревьюеров) тебе на ✅/✏️?", lh: "Отложить ролик? Канал будет ждать." };
 // локальный статус после кнопки (до подтверждения ботом): короткие в D.items, длинные (id L-...) в D.long
 function setLocal(id, st, text) {
   if (String(id).startsWith("ST-")) { const x = (D.style_tests || []).find((y) => y.id === id), a = Object.keys(NEXT).find((k) => NEXT[k] === st); if (x && st) { x.decision = st.replace(/^ST:/, ""); x.label = LABEL[a] || x.decision; if (text) x.text = ((x.text || "") + "\n" + text).trim(); } return; }
   if (String(id).startsWith("L-")) { const v = longAll().find((x) => x.id === id); if (v && st) { v.status = st.replace(/^L:/, ""); v.label = (D.long.statuses || {})[v.status] || v.status; if (text) (v.notes = v.notes || []).push("сейчас " + text); } return; }
-  const it = D.items.find((x) => x.id === id); if (it) { if (!(it.held && st !== "you" && it.status === "published")) it.status = st; it.wait = st === "you"; it.undo_until = st === "you" ? 0 : Date.now() / 1000 + 600; if (text) it.notes = ((it.notes || "") + "\n" + text).trim(); }
+  const it = D.items.find((x) => x.id === id); if (it) { if (!(it.held && st !== "you" && it.status === "published")) it.status = st; it.wait = st === "you"; it.undo_until = st === "you" || it.long_script ? 0 : Date.now() / 1000 + 600; /* lscript1811: у сценария длинного нет «↩️ Отменить» */ if (text) it.notes = ((it.notes || "") + "\n" + text).trim(); }
 }
 // очередь неотправленных команд (лимит ntfy / нет сети): повтор раз в 2 минуты и при каждом открытии, команды уже зашифрованы
 function pend() { try { return JSON.parse(localStorage.getItem("chaga_pending") || "[]"); } catch (e) { return []; } }
@@ -219,7 +219,7 @@ setInterval(flush, 120e3); setTimeout(flush, 3e3);
 async function act(a, id) {
   if (CONFIRM[a] && !window.confirm(CONFIRM[a])) return;
   let text = "";
-  if (a === "ed" || a === "rw" || a === "le" || a === "sed") { text = await ask(a === "sed" ? "Правки к пробе стиля " + id : a === "ed" ? "Правки к карточке " + id : a === "le" ? "Замечание к длинному ролику " + id : "Что не так? (можно пусто) " + id, a !== "rw"); if (text === null) return; }
+  if (a === "ed" || a === "rw" || a === "le" || a === "sed" || a === "ke") { text = await ask(a === "ke" ? "Что поправить в сценарии " + id + "? Сценарист перепишет, новая версия придёт сюда же" : a === "sed" ? "Правки к пробе стиля " + id : a === "ed" ? "Правки к карточке " + id : a === "le" ? "Замечание к длинному ролику " + id : "Что не так? (можно пусто) " + id, a !== "rw"); if (text === null) return; }
   try {
     const n = crypto.getRandomValues(new Uint32Array(2)).join("");
     const body = await seal({ a, id, text: text.trim(), ts: Date.now(), n });
@@ -489,14 +489,18 @@ function card(i) {
   const meta = [i.rubric, i.style, i.seconds ? `~${i.seconds} с` : "", i.stage].filter(Boolean).map((x) => `<span class="chip">${esc(x)}</span>`).join("");
   const vid = i.video ? `<details data-v="${esc(i.video)}" open><summary>Видео</summary><div class="vst btns"><a class="ok vbtn" href="#">▶ Смотреть</a></div><div class="bar" style="display:none"><i></i></div><div class="vmsg lvst"></div><video controls playsinline preload="none" style="display:none"></video></details>` : "";
   const B = (a, t, c) => `<a${c ? ' class="ok"' : ""} data-a="${a}" data-id="${esc(i.id)}" href="#">${t}</a>`;
-  const btns = i.held && waits(i) ? `<div class="btns">${B("ap", "✅ Вернуть в план", 1)}${B("tr", "🗑 Не выкладывать")}${B("ed", "✏️ Правки")}${B("vo", "🎙 Голосом")}</div>`
+  // 18.11 lscript1811: сценарий длинного (S-<канал>-<NN>): ✅ / ✏️ уходят в тот же обработчик, что кнопки карточки в боте
+  const btns = i.long_script && waits(i) ? `<div class="btns">${B("ka", "✅ Сценарий ок", 1)}${B("ke", "✏️ Правки")}</div>`
+    : i.long_script ? "" : i.held && waits(i) ?`<div class="btns">${B("ap", "✅ Вернуть в план", 1)}${B("tr", "🗑 Не выкладывать")}${B("ed", "✏️ Правки")}${B("vo", "🎙 Голосом")}</div>`
     : waits(i) ? `<div class="btns">${B("ap", "✅ Беру", 1)}${B("ed", "✏️ Правки")}${B("vo", "🎙 Голосом")}${B("rw", "❌ Переделать")}${B("tr", "🗑 Мусор")}</div>`
     : i.undo_until && Date.now() / 1000 < i.undo_until ? `<div class="btns">${B("un", "↩️ Отменить (10 мин)")}</div>` : "";
   const held = i.held && waits(i) ? `<div class="held">⏸ Снят с выкладки, ждёт решения: ${esc(i.held)}</div>` : "";
   const rwk = i.rework ? `<div class="held">🔁 ${esc(i.rework)}</div>` : "";
   return `<div class="card"><div class="top"><span>${kind} ${flag} ${esc(i.id)}</span><span>${esc(i.updated || "")}</span></div>
     <div class="title">${esc(i.title)}</div>${held}${rwk}<div class="chips">${meta}</div><div class="chips">${sc}</div>${vid}
-    ${i.text ? `<details${i.kind === "script" && i.status === "you" ? " open" : ""}><summary>Текст</summary><div class="text">${esc(i.text)}</div></details>` : ""}
+    ${(i.chapters || []).length ? `<details><summary>Главы (${i.chapters.length})</summary><div class="text">${esc(i.chapters.map((c, k) => (k + 1) + ". " + c).join("\n"))}</div></details>` : ""}
+    ${i.text ? `<details${i.kind === "script" && i.status === "you" ? " open" : ""}><summary>${esc(i.text_label || "Текст")}</summary><div class="text">${esc(i.text)}</div></details>` : ""}
+    ${i.text_en ? `<details><summary>Оригинал (EN, идёт в озвучку)</summary><div class="text">${esc(i.text_en)}</div></details>` : ""}
     ${i.caption ? `<details${i.kind === "reel" ? " open" : ""}><summary>Подпись к ролику</summary><div class="text">${esc(i.caption)}</div></details>` : ""}
     ${i.review ? `<details><summary>Что исправили ревьюеры</summary><div class="text">${esc(i.review)}</div></details>` : ""}
     ${i.notes ? `<details open><summary>Твои правки</summary><div class="text">${esc(i.notes)}</div></details>` : ""}
