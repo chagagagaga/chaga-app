@@ -91,10 +91,12 @@
   .anac { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:-4px 0 12px; font-size:14px; }
   .anac input { font:15px inherit; padding:6px 8px; border:1px solid var(--line); border-radius:8px; background:var(--card); color:var(--ink); }
 .thg{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:6px 0}.thg figure.best{grid-column:1/-1}.thg figure{margin:0;border-radius:10px;overflow:hidden;border:2px solid transparent}.thg figure.best{border-color:#f2c21a}.thg img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;background:#222}.thg figcaption{font-size:12px;padding:4px 6px;opacity:.85}
+  #qbar:empty { display:none; } #qbar { margin:6px 0 0; padding:8px 10px; border-radius:10px; background:var(--card); border:1px solid var(--bad); font-size:14px; }
+  #qbar button { margin-left:8px; border:0; border-radius:8px; padding:6px 10px; background:var(--acc); color:#000; font-size:14px; }
 </style>
 </head>
 <body>
-<header><h1>CHAGA CARTOONS<small id="upd"></small></h1><nav id="tabs"></nav></header>
+<header><h1>CHAGA CARTOONS<small id="upd"></small></h1><nav id="tabs"></nav><div id="qbar"></div></header>
 <main id="list"><div id="msg">Загружаю…</div></main>
 <script>
 const TG = window.Telegram && Telegram.WebApp; if (TG) { TG.ready(); TG.expand(); }
@@ -121,12 +123,15 @@ async function open(buf) {
 // имена с хэшем не меняются) -> API -> Pages. API без токена = 60 запросов в час на IP: при 403/429 API на 15 мин пропускаем.
 const GH_API = "https://api.github.com/repos/chagagagaga/chaga-app/contents/", GH_RAW = "https://raw.githubusercontent.com/chagagagaga/chaga-app/";
 let API_OFF = 0;
+// 19.11 tgq1911 (Алексей: «приложение залагало»; ntfy.sh недоступен): любой запрос не дольше ms, иначе отказ, а не зависание
+async function fetchT(u, init, ms) { const c = new AbortController(), t = setTimeout(() => c.abort(), ms || 10000); try { return await fetch(u, Object.assign({}, init || {}, { signal: c.signal })); } finally { clearTimeout(t); } }
+let NTFY_DOWN = 0;                                  // ntfy не ответил: до этой минуты не ждём подтверждений, команды сразу в очередь
 async function fetchFirst(srcs) {
   let last = null;
   for (const s of srcs) {
     if (s.api && Date.now() < API_OFF) continue;
     try {
-      const r = await fetch(s.u, s.init || {});
+      const r = await fetchT(s.u, s.init || {}, 20000);
       if (r.ok) return r;
       if (s.api && (r.status === 403 || r.status === 429)) API_OFF = Date.now() + 15 * 60e3;
       last = new Error("HTTP " + r.status);
@@ -146,6 +151,7 @@ async function load() {
   const txt = await new Response(new Blob([plain]).stream().pipeThrough(new DecompressionStream("gzip"))).text();
   if (txt === LAST) return;                        // 30.10: данные не менялись: не перерисовываем (раньше раз в минуту обнулялся ролик)
   LAST = txt; D = JSON.parse(txt);
+  pruneQueue();                                    // tgq1911: применённое ботом (любым путём) из очереди убираем
   for (const c of pend()) {
     if (String(c.id || "").startsWith("L-")) { const v = longAll().find((x) => x.id === c.id); if (v && v.status === "ready") setLocal(c.id, c.st, ""); continue; }
     const it = c.id && D.items.find((x) => x.id === c.id); if (it && waits(it)) { it.status = c.st; it.wait = false; }
@@ -158,20 +164,27 @@ const VID = {};                                     // плееры по пут�
 // (адрес ящика выводится из ключа), бот забирает её каждые 30 с. Без ключа команду не подделать.
 async function topic(kind) { const h = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode("chaga-" + (kind || "cmd") + ":" + K))); return "chaga-" + Array.from(h.slice(0, 16), (x) => x.toString(16).padStart(2, "0")).join(""); }
 // 12.11 P0: бот отвечает приложению (зашифрованно) в свой ящик ntfy «ack»: приложение знает, что команда дошла
-async function waitAck(n, ms) {
-  const t0 = Date.now(), since = Math.floor(t0 / 1000) - 5, tp = await topic("ack");
-  while (Date.now() - t0 < ms) {
+const ACKS = new Map(); let ACK_RUN = false;      // tgq1911: один общий опрос ящика «ack» на все кнопки
+function waitAck(n, ms) {
+  if (Date.now() < NTFY_DOWN) return Promise.resolve(null);
+  return new Promise((done) => { ACKS.set(String(n), { done, until: Date.now() + ms }); if (!ACK_RUN) ackLoop(); });
+}
+async function ackLoop() {
+  ACK_RUN = true;
+  const since = Math.floor(Date.now() / 1000) - 10, tp = await topic("ack");
+  while (ACKS.size) {
     try {
-      const r = await fetch(`https://ntfy.sh/${tp}/json?poll=1&since=${since}`, { cache: "no-store" });
+      const r = await fetchT(`https://ntfy.sh/${tp}/json?poll=1&since=${since}`, { cache: "no-store" }, 8000);
       if (r.ok) for (const line of (await r.text()).split("\n")) {
         if (!line.trim()) continue; let ev; try { ev = JSON.parse(line); } catch (e) { continue; }
         if (ev.event !== "message") continue;
-        try { const d = JSON.parse(new TextDecoder().decode(await open(b64(ev.message).buffer))); if (String(d.n) === String(n)) return d; } catch (e) {}
+        try { const d = JSON.parse(new TextDecoder().decode(await open(b64(ev.message).buffer))); const w = ACKS.get(String(d.n)); if (w) { ACKS.delete(String(d.n)); w.done(d); } } catch (e) {}
       }
-    } catch (e) {}
-    await new Promise((res) => setTimeout(res, 2500));
+    } catch (e) { NTFY_DOWN = Date.now() + 120e3; }
+    for (const [k, w] of ACKS) if (Date.now() > w.until || Date.now() < NTFY_DOWN) { ACKS.delete(k); w.done(null); }
+    if (ACKS.size) await new Promise((res) => setTimeout(res, 3000));
   }
-  return null;
+  ACK_RUN = false;
 }
 // 12.11 P0: window.prompt в Telegram WebView не показывается: свой диалог с большим полем
 function ask(title, need) {
@@ -209,13 +222,44 @@ function queue(body, id, st) { const q = pend(); q.push({ body, id, st }); try {
 async function flush() {
   let q = pend(); if (!q.length || !K) return; const sent = q.length;
   while (q.length) {
-    let r = null; try { r = await fetch("https://ntfy.sh/" + await topic(), { method: "POST", body: q[0].body || q[0] }); } catch (x) {}
-    if (!r || !r.ok) break;
+    let r = null; try { r = await fetchT("https://ntfy.sh/" + await topic(), { method: "POST", body: q[0].body || q[0] }, 8000); } catch (x) {}
+    if (!r || !r.ok) { NTFY_DOWN = Date.now() + 120e3; break; }
     q.shift(); try { localStorage.setItem("chaga_pending", JSON.stringify(q)); } catch (e) {}
   }
   if (q.length < sent) toast(`Дослал из очереди: ${sent - q.length}${q.length ? ", ждут ещё " + q.length : ""}.`);
+  qbar();
 }
-setInterval(flush, 120e3); setTimeout(flush, 3e3);
+// tgq1911: неотправленные команды видны всегда; «📨 Дослать через Telegram» = WebApp.sendData (работает, когда приложение
+// открыто кнопкой «📱 Приложение» внизу чата бота): пачка тех же зашифрованных команд, бот применит и ответит в чате
+function pruneQueue() {
+  const q = pend(); if (!q.length || !D) return;
+  const old = (c) => c.tg && Date.now() - c.tg > 600e3;
+  const keep = q.filter((c) => {
+    const id = String(c.id || "");
+    if (!id || id === "IDEA" || id.startsWith("ST-")) return !old(c);
+    if (id.startsWith("L-")) { const v = longAll().find((x) => x.id === id); return !!v && v.status === "ready"; }
+    const it = D.items.find((x) => x.id === id);
+    return !!it && waits(it);                       // на сервере уже не ждёт решения = команда дошла
+  });
+  if (keep.length !== q.length) { try { localStorage.setItem("chaga_pending", JSON.stringify(keep)); } catch (e) {} }
+  qbar();
+}
+function qbar() {
+  const el = document.getElementById("qbar"); if (!el) return;
+  const q = pend().filter((c) => !c.tg || Date.now() - c.tg > 180e3), late = q.some((c) => c.tg);
+  el.innerHTML = q.length ? `⏳ Не дошло до бота: ${q.length} (связь с ntfy). Само дошлю, когда связь вернётся.${TG && TG.sendData ? '<button id="qtg">📨 Дослать через Telegram</button>' : ""}${late ? "<br>Через Telegram не дошло: открой приложение кнопкой «📱 Приложение» внизу чата бота и нажми ещё раз." : ""}` : "";
+  const b = document.getElementById("qtg"); if (b) b.onclick = sendViaTg;
+}
+function sendViaTg() {
+  const all = pend(), pick = [];
+  let size = 10;
+  for (const c of all) { if (c.tg && Date.now() - c.tg < 180e3) continue; const body = c.body || c; if (size + body.length + 3 > 4000) break; pick.push(body); size += body.length + 3; }
+  if (!pick.length) return;
+  try { localStorage.setItem("chaga_pending", JSON.stringify(all.map((c) => pick.includes(c.body || c) ? Object.assign({}, c, { tg: Date.now() }) : c))); } catch (e) {}
+  try { TG.sendData(JSON.stringify({ q: pick })); }
+  catch (e) { toast("Telegram не принял: открой приложение кнопкой «📱 Приложение» внизу чата бота и нажми ещё раз."); try { localStorage.setItem("chaga_pending", JSON.stringify(all)); } catch (x) {} qbar(); }
+}
+setInterval(flush, 120e3); setTimeout(flush, 3e3); setTimeout(qbar, 500);
 async function act(a, id) {
   if (CONFIRM[a] && !window.confirm(CONFIRM[a])) return;
   let text = "";
@@ -225,12 +269,14 @@ async function act(a, id) {
     const body = await seal({ a, id, text: text.trim(), ts: Date.now(), n });
     // ntfy превращает сообщения > 4096 байт во вложение, и бот их не прочтёт: не отправляем, просим разделить
     if (body.length > 3800) { toast("Слишком длинная правка для одной отправки. Раздели на части и отправь по очереди."); return; }
-    let r = null; try { r = await fetch("https://ntfy.sh/" + await topic(), { method: "POST", body }); } catch (x) {}
+    const early = a !== "vo";                        // tgq1911: карточка меняется сразу, отправка идёт в фоне (без ожидания сети)
+    if (early) { setLocal(id, NEXT[a], text.trim()); toast(`${LABEL[a]}: ${id}. Отправляю…`); render(); }
+    let r = null; if (Date.now() >= NTFY_DOWN) { try { r = await fetchT("https://ntfy.sh/" + await topic(), { method: "POST", body }, 8000); } catch (x) { NTFY_DOWN = Date.now() + 120e3; } }
     // 30.10: лимит ntfy (429, ~250 сообщений в сутки на IP, сброс 00:00 UTC) или нет сети: команда в очередь, приложение дошлёт само
     if (!r || r.status === 429 || r.status >= 500) {
       if (a === "vo") throw new Error(r ? "ntfy " + r.status : "нет сети");
-      queue(body, id, NEXT[a]); setLocal(id, NEXT[a], text.trim());
-      toast(`${LABEL[a]}: ${id}. ntfy ${r ? "упёрся в дневной лимит" : "недоступен"}, сохранил в очередь: дошлю сам, как откроется.`); render(); return;
+      queue(body, id, NEXT[a]); if (!early) setLocal(id, NEXT[a], text.trim());
+      toast(`${LABEL[a]}: ${id}. ntfy ${r ? "упёрся в дневной лимит" : "недоступен"}, сохранил в очередь: дошлю сам или «📨 Дослать через Telegram».`); render(); qbar(); return;
     }
     if (!r.ok) throw new Error("ntfy " + r.status);
     if (a === "vo") {                                // 12.11 P0: сначала подтверждение бота, потом в чат (раньше закрывалось сразу: гонка)
@@ -240,7 +286,7 @@ async function act(a, id) {
       if (TG) setTimeout(() => TG.close(), 1200); else setTimeout(() => { location.href = "https://t.me/chaga_cartoons_bot"; }, 1200);
       return;
     }
-    setLocal(id, NEXT[a], text.trim());
+    if (!early) setLocal(id, NEXT[a], text.trim());
     toast(`${LABEL[a]}: ${id}. Отправил боту…`); render();
     waitAck(n, 90e3).then((ack) => toast(ack ? (ack.ok ? "Бот записал: " : "Бот: ") + ack.msg.slice(0, 160) : `${LABEL[a]}: ${id}. Бот пока не подтвердил, запишет, когда дойдёт.`));
   } catch (e) { toast("Не отправилось: " + e.message + ". Попробуй ещё раз."); }
@@ -369,8 +415,8 @@ async function sendIdea(mode) {
     if (body.length > 3800) { toast("Слишком длинно для одной отправки. Сократи или раздели на две идеи."); return; }
     const at = new Date().toLocaleString("ru-RU", { timeZone: "Asia/Almaty", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).replace(",", "");
     const loc = { text, mode, langs, at, t: Date.now(), label: "📨 отправлено, жду подтверждения бота" };
-    let r = null; try { r = await fetch("https://ntfy.sh/" + await topic(), { method: "POST", body }); } catch (x) {}
-    if (!r || r.status === 429 || r.status >= 500) { queue(body, "IDEA", null); loc.label = "📨 нет связи с ящиком команд: сохранил, дошлю сам"; }
+    let r = null; if (Date.now() >= NTFY_DOWN) { try { r = await fetchT("https://ntfy.sh/" + await topic(), { method: "POST", body }, 8000); } catch (x) { NTFY_DOWN = Date.now() + 120e3; } }
+    if (!r || r.status === 429 || r.status >= 500) { queue(body, "IDEA", null); loc.label = "📨 нет связи с ящиком команд: сохранил, дошлю сам"; qbar(); }
     else if (!r.ok) throw new Error("ntfy " + r.status);
     addLocalIdea(loc); ta.value = ""; try { localStorage.removeItem("chaga_idea_draft"); } catch (e) {}
     render();
